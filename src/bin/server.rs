@@ -2,6 +2,7 @@
 
 use anyhow::{Context, Result};
 use serde_json::json;
+use std::sync::Arc;
 use tokio::net::UnixListener;
 use tracing::{error, info};
 use veto::adapters::claude::response as claude_response;
@@ -11,6 +12,7 @@ use veto::cedar_runtime::CedarRuntime;
 use veto::config::Config;
 use veto::hook::HookKind;
 use veto::ipc::{self, AdjudicateOk, AdjudicateRequest};
+use veto::watcher;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -32,13 +34,18 @@ async fn main() -> Result<()> {
     // Remove stale socket
     let _ = std::fs::remove_file(&config.socket_path);
 
-    let cedar = CedarRuntime::load(&config.policy_dir)
-        .context("load Cedar policies")?;
+    let cedar = Arc::new(
+        CedarRuntime::load(&config.policy_dir).context("load Cedar policies")?,
+    );
     info!(
         policies = cedar.policy_count(),
         dir = %config.policy_dir.display(),
         "Cedar runtime loaded"
     );
+
+    // Start file watcher for hot-reload
+    let _watcher_handle = watcher::spawn_watcher(&config.policy_dir, Arc::clone(&cedar))
+        .context("start policy watcher")?;
 
     let audit = AuditLog::open(&config.db_path).context("open audit log")?;
     info!(path = %config.db_path.display(), "Audit log opened");

@@ -7,3 +7,4 @@ pub mod hook;
 pub mod ipc;
 pub mod process_context;
 pub mod signature;
+pub mod watcher;
