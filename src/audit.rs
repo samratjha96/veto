@@ -2,8 +2,23 @@
 
 use anyhow::{Context, Result};
 use rusqlite::Connection;
+use serde::Serialize;
 use std::path::Path;
 use std::sync::Mutex;
+
+/// A single audit event row.
+#[derive(Debug, Clone, Serialize)]
+pub struct AuditEvent {
+    pub id: i64,
+    pub timestamp: String,
+    pub hook_type: String,
+    pub tool_name: Option<String>,
+    pub action_summary: Option<String>,
+    pub decision: String,
+    pub policy_id: Option<String>,
+    pub yara_categories: Option<String>,
+    pub yara_severity: Option<String>,
+}
 
 pub struct AuditLog {
     conn: Mutex<Connection>,
@@ -71,6 +86,63 @@ impl AuditLog {
             .context("count events")?;
         Ok(count)
     }
+
+    /// Query recent events with optional filters. Returns newest first.
+    pub fn query_events(
+        &self,
+        limit: usize,
+        decision_filter: Option<&str>,
+        hook_filter: Option<&str>,
+    ) -> Result<Vec<AuditEvent>> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("{e}"))?;
+
+        let mut sql = String::from(
+            "SELECT id, timestamp, hook_type, tool_name, action_summary, \
+             decision, policy_id, yara_categories, yara_severity FROM events",
+        );
+        let mut conditions = Vec::new();
+        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+        if let Some(d) = decision_filter {
+            conditions.push(format!("decision = ?{}", params.len() + 1));
+            params.push(Box::new(d.to_string()));
+        }
+        if let Some(h) = hook_filter {
+            conditions.push(format!("hook_type = ?{}", params.len() + 1));
+            params.push(Box::new(h.to_string()));
+        }
+
+        if !conditions.is_empty() {
+            sql.push_str(" WHERE ");
+            sql.push_str(&conditions.join(" AND "));
+        }
+        sql.push_str(" ORDER BY id DESC LIMIT ?");
+        params.push(Box::new(limit as i64));
+
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        let mut stmt = conn.prepare(&sql).context("prepare query")?;
+        let rows = stmt
+            .query_map(param_refs.as_slice(), |row| {
+                Ok(AuditEvent {
+                    id: row.get(0)?,
+                    timestamp: row.get(1)?,
+                    hook_type: row.get(2)?,
+                    tool_name: row.get(3)?,
+                    action_summary: row.get(4)?,
+                    decision: row.get(5)?,
+                    policy_id: row.get(6)?,
+                    yara_categories: row.get(7)?,
+                    yara_severity: row.get(8)?,
+                })
+            })
+            .context("query events")?;
+
+        let mut events = Vec::new();
+        for row in rows {
+            events.push(row.context("read event row")?);
+        }
+        Ok(events)
+    }
 }
 
 #[cfg(test)]
@@ -126,5 +198,52 @@ mod tests {
         )
         .unwrap();
         assert_eq!(log.event_count().unwrap(), 2);
+    }
+
+    #[test]
+    fn query_events_returns_recent() {
+        let (log, _path) = temp_db();
+        for i in 0..5 {
+            log.log_event("pre-tool-use", Some("Bash"), Some(&format!("cmd-{i}")), "allow", None, None, None)
+                .unwrap();
+        }
+        let events = log.query_events(3, None, None).unwrap();
+        assert_eq!(events.len(), 3);
+        // Newest first — id 5 before id 4
+        assert!(events[0].id > events[1].id);
+        assert_eq!(events[0].action_summary.as_deref(), Some("cmd-4"));
+    }
+
+    #[test]
+    fn query_events_filters_by_decision() {
+        let (log, _path) = temp_db();
+        log.log_event("pre-tool-use", Some("Bash"), Some("ls"), "allow", None, None, None).unwrap();
+        log.log_event("pre-tool-use", Some("Bash"), Some("rm /"), "deny", Some("p1"), None, None).unwrap();
+        log.log_event("pre-tool-use", Some("Bash"), Some("cat /etc"), "deny", Some("p2"), None, None).unwrap();
+
+        let denied = log.query_events(10, Some("deny"), None).unwrap();
+        assert_eq!(denied.len(), 2);
+        assert!(denied.iter().all(|e| e.decision == "deny"));
+
+        let allowed = log.query_events(10, Some("allow"), None).unwrap();
+        assert_eq!(allowed.len(), 1);
+    }
+
+    #[test]
+    fn query_events_filters_by_hook_type() {
+        let (log, _path) = temp_db();
+        log.log_event("pre-tool-use", Some("Bash"), Some("ls"), "allow", None, None, None).unwrap();
+        log.log_event("post-tool-use", Some("Bash"), Some("ls"), "allow", None, None, None).unwrap();
+
+        let pre = log.query_events(10, None, Some("pre-tool-use")).unwrap();
+        assert_eq!(pre.len(), 1);
+        assert_eq!(pre[0].hook_type, "pre-tool-use");
+    }
+
+    #[test]
+    fn query_events_empty_db() {
+        let (log, _path) = temp_db();
+        let events = log.query_events(10, None, None).unwrap();
+        assert!(events.is_empty());
     }
 }

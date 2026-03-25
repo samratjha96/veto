@@ -351,6 +351,63 @@ fn web_fetch_exfil_detected() {
 }
 
 #[test]
+fn audit_query_after_adjudication() {
+    let cedar = CedarRuntime::load(&policy_dir()).unwrap();
+    let (audit, _) = temp_db();
+
+    // Run a safe command and a dangerous command
+    let safe = make_request(
+        "pre-tool-use",
+        json!({"tool_name": "Bash", "tool_input": {"command": "echo hi"}}),
+    );
+    handle_request(&cedar, &audit, &safe);
+
+    let dangerous = make_request(
+        "pre-tool-use",
+        json!({"tool_name": "Bash", "tool_input": {"command": "rm -rf /"}}),
+    );
+    handle_request(&cedar, &audit, &dangerous);
+
+    // Query all events
+    let all = audit.query_events(10, None, None).unwrap();
+    assert_eq!(all.len(), 2);
+    // Newest first
+    assert!(all[0].id > all[1].id);
+
+    // Query only denied
+    let denied = audit.query_events(10, Some("deny"), None).unwrap();
+    assert!(!denied.is_empty());
+    assert!(denied.iter().all(|e| e.decision == "deny"));
+
+    // Query only allowed
+    let allowed = audit.query_events(10, Some("allow"), None).unwrap();
+    assert!(!allowed.is_empty());
+    assert!(allowed.iter().all(|e| e.decision == "allow"));
+}
+
+#[test]
+fn policy_list_reads_cedar_files() {
+    let dir = policy_dir();
+    let entries: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "cedar"))
+        .collect();
+    assert!(!entries.is_empty(), "should have at least one .cedar file");
+
+    // Verify @id annotations can be extracted from at least one file
+    let mut found_id = false;
+    for entry in &entries {
+        let content = std::fs::read_to_string(entry.path()).unwrap();
+        if content.contains("@id(\"") {
+            found_id = true;
+            break;
+        }
+    }
+    assert!(found_id, "at least one policy should have @id annotation");
+}
+
+#[test]
 fn secrets_in_command_detected() {
     let cedar = CedarRuntime::load(&policy_dir()).unwrap();
     let (audit, _) = temp_db();

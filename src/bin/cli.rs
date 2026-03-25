@@ -1,11 +1,12 @@
 //! veto CLI: thin client for the veto-server daemon.
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use serde_json::json;
 use std::io::Read;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
+use veto::audit::AuditLog;
 use veto::ipc::{self, AdjudicateOk};
 
 #[derive(Parser)]
@@ -38,6 +39,21 @@ enum Commands {
         #[command(subcommand)]
         command: PolicyCommands,
     },
+    /// Query the audit log
+    Audit {
+        /// Max events to show
+        #[arg(long, default_value = "20")]
+        limit: usize,
+        /// Filter by decision (allow, deny, ask)
+        #[arg(long)]
+        decision: Option<String>,
+        /// Filter by hook type (e.g. pre-tool-use)
+        #[arg(long, name = "hook-type")]
+        hook_type: Option<String>,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -46,6 +62,16 @@ enum PolicyCommands {
     Add {
         /// Natural language description of the policy
         description: String,
+        /// Print generated policy without saving
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// List loaded Cedar policies
+    List,
+    /// Remove a Cedar policy file
+    Remove {
+        /// Policy filename (with or without .cedar extension)
+        name: String,
     },
 }
 
@@ -64,6 +90,15 @@ fn policy_dir() -> PathBuf {
     std::env::var("VETO_POLICY_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("./policies"))
+}
+
+fn db_path() -> PathBuf {
+    std::env::var("VETO_DB")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+            home.join(".veto/audit.db")
+        })
 }
 
 fn send_request(socket: &std::path::Path, request_json: &[u8]) -> Result<AdjudicateOk> {
@@ -145,18 +180,31 @@ fn main() -> Result<()> {
             }
         }
         Commands::Policy { command } => match command {
-            PolicyCommands::Add { description } => {
-                // Build an async runtime for this one-shot operation
+            PolicyCommands::Add { description, dry_run } => {
                 let rt = tokio::runtime::Runtime::new().context("create tokio runtime")?;
-                rt.block_on(handle_policy_add(&description, &socket))?;
+                rt.block_on(handle_policy_add(&description, &socket, dry_run))?;
+            }
+            PolicyCommands::List => {
+                handle_policy_list()?;
+            }
+            PolicyCommands::Remove { name } => {
+                handle_policy_remove(&name, &socket)?;
             }
         },
+        Commands::Audit {
+            limit,
+            decision,
+            hook_type,
+            json,
+        } => {
+            handle_audit(limit, decision.as_deref(), hook_type.as_deref(), json)?;
+        }
     }
 
     Ok(())
 }
 
-async fn handle_policy_add(description: &str, socket: &std::path::Path) -> Result<()> {
+async fn handle_policy_add(description: &str, socket: &std::path::Path, dry_run: bool) -> Result<()> {
     let api_key = std::env::var("API_KEY")
         .context("API_KEY env var required for policy generation")?;
     let model = std::env::var("VETO_MODEL")
@@ -185,6 +233,11 @@ async fn handle_policy_add(description: &str, socket: &std::path::Path) -> Resul
     println!("\n--- Generated Policy: {} ---\n", generated.policy_id);
     println!("{}", generated.cedar_text);
     println!("\n--- End Policy ---\n");
+
+    if dry_run {
+        eprintln!("(dry-run: not saving)");
+        return Ok(());
+    }
 
     // Ask for confirmation
     eprint!("Save to {}/{}? [Enter to confirm, Ctrl+C to cancel] ", dir.display(), generated.file_name);
@@ -219,6 +272,157 @@ async fn handle_policy_add(description: &str, socket: &std::path::Path) -> Resul
         Err(_) => {
             eprintln!("Note: could not reach veto-server for reload (file watcher will pick up the change)");
         }
+    }
+
+    Ok(())
+}
+
+fn handle_policy_list() -> Result<()> {
+    let dir = policy_dir();
+    if !dir.is_dir() {
+        bail!("Policy directory not found: {}", dir.display());
+    }
+
+    let mut entries: Vec<_> = std::fs::read_dir(&dir)
+        .with_context(|| format!("read {}", dir.display()))?
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.path()
+                .extension()
+                .is_some_and(|ext| ext == "cedar")
+        })
+        .collect();
+    entries.sort_by_key(|e| e.file_name());
+
+    if entries.is_empty() {
+        println!("No .cedar policy files in {}", dir.display());
+        return Ok(());
+    }
+
+    for entry in &entries {
+        let path = entry.path();
+        let filename = path.file_name().unwrap_or_default().to_string_lossy();
+        let content = std::fs::read_to_string(&path).unwrap_or_default();
+
+        // Extract @id annotations
+        let ids: Vec<&str> = content
+            .lines()
+            .filter_map(|line| {
+                let trimmed = line.trim();
+                if trimmed.starts_with("@id(\"") && trimmed.ends_with("\")") {
+                    Some(&trimmed[5..trimmed.len() - 2])
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if ids.is_empty() {
+            println!("  {filename}  (no @id annotations)");
+        } else {
+            println!("  {filename}");
+            for id in ids {
+                println!("    - {id}");
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn handle_policy_remove(name: &str, socket: &std::path::Path) -> Result<()> {
+    let dir = policy_dir();
+    let filename = if name.ends_with(".cedar") {
+        name.to_string()
+    } else {
+        format!("{name}.cedar")
+    };
+    let path = dir.join(&filename);
+
+    if !path.exists() {
+        bail!("Policy file not found: {}", path.display());
+    }
+
+    // Show what we're about to delete
+    let content = std::fs::read_to_string(&path)
+        .with_context(|| format!("read {}", path.display()))?;
+    eprintln!("--- {} ---", filename);
+    eprintln!("{content}");
+    eprintln!("--- end ---\n");
+
+    eprint!("Delete {}? [Enter to confirm, Ctrl+C to cancel] ", path.display());
+    let mut confirm = String::new();
+    std::io::stdin()
+        .read_line(&mut confirm)
+        .context("read confirmation")?;
+
+    std::fs::remove_file(&path)
+        .with_context(|| format!("delete {}", path.display()))?;
+    eprintln!("Deleted: {}", path.display());
+
+    // Try to reload server
+    let request = json!({"hook": "reload", "payload": {}});
+    let request_bytes = serde_json::to_vec(&request)?;
+    match send_request(socket, &request_bytes) {
+        Ok(resp) if resp.ok => {
+            if let Some(data) = resp.data {
+                let count = data["policy_count"].as_i64().unwrap_or(0);
+                eprintln!("Server reloaded: {count} policies active");
+            }
+        }
+        Ok(_) | Err(_) => {
+            eprintln!("Note: could not reload server (file watcher will pick up the change)");
+        }
+    }
+
+    Ok(())
+}
+
+fn handle_audit(
+    limit: usize,
+    decision: Option<&str>,
+    hook_type: Option<&str>,
+    as_json: bool,
+) -> Result<()> {
+    let db_path = db_path();
+    if !db_path.exists() {
+        bail!("Audit database not found: {}", db_path.display());
+    }
+
+    let audit = AuditLog::open(&db_path)
+        .with_context(|| format!("open {}", db_path.display()))?;
+    let events = audit.query_events(limit, decision, hook_type)?;
+
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&events)?);
+        return Ok(());
+    }
+
+    if events.is_empty() {
+        println!("No audit events found.");
+        return Ok(());
+    }
+
+    // Table header
+    println!(
+        "{:<5} {:<20} {:<15} {:<10} {:<8} {}",
+        "ID", "TIMESTAMP", "HOOK", "TOOL", "DECISION", "SUMMARY"
+    );
+    println!("{}", "-".repeat(80));
+
+    for e in &events {
+        let tool = e.tool_name.as_deref().unwrap_or("-");
+        let summary = e.action_summary.as_deref().unwrap_or("-");
+        // Truncate summary for table display
+        let summary_short = if summary.len() > 40 {
+            format!("{}...", &summary[..37])
+        } else {
+            summary.to_string()
+        };
+        println!(
+            "{:<5} {:<20} {:<15} {:<10} {:<8} {}",
+            e.id, e.timestamp, e.hook_type, tool, e.decision, summary_short
+        );
     }
 
     Ok(())
