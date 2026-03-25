@@ -191,7 +191,14 @@ fn multiple_requests_audit_logged() {
 
 #[test]
 fn hot_reload_picks_up_new_policy() {
-    let cedar = CedarRuntime::load(&policy_dir()).unwrap();
+    // Use a temp dir to avoid races with other tests reading policy_dir()
+    let dir = tempfile::tempdir().unwrap();
+    for entry in std::fs::read_dir(&policy_dir()).unwrap() {
+        let entry = entry.unwrap();
+        std::fs::copy(entry.path(), dir.path().join(entry.file_name())).unwrap();
+    }
+
+    let cedar = CedarRuntime::load(dir.path()).unwrap();
     let (audit, _) = temp_db();
 
     // Verify a benign command is allowed
@@ -222,7 +229,7 @@ forbid(
     context.command like "*testing_veto_reload_marker*"
 };
 "#;
-    let policy_path = policy_dir().join("test_reload.cedar");
+    let policy_path = dir.path().join("test_reload.cedar");
     std::fs::write(&policy_path, new_policy).expect("write test policy");
 
     // Reload policies
@@ -237,11 +244,6 @@ forbid(
         output["permissionDecision"], "deny",
         "should be denied after policy reload"
     );
-
-    // Clean up the test policy
-    let _ = std::fs::remove_file(&policy_path);
-    // Reload to restore clean state
-    let _ = cedar.reload();
 }
 
 #[test]
@@ -550,4 +552,102 @@ fn test_command_json_output_fields() {
     assert!(!result.scan_text.is_empty());
     assert!(result.sig.match_count() > 0);
     assert!(!result.sig.categories.is_empty());
+}
+
+// ---------- policy templates ----------
+
+#[test]
+fn template_apply_produces_valid_cedar() {
+    // Apply every template and verify the resulting policies load
+    let dir = tempfile::tempdir().unwrap();
+    let policy_src = policy_dir();
+
+    // Copy base schema + policies so CedarRuntime can load
+    for entry in std::fs::read_dir(&policy_src).unwrap() {
+        let entry = entry.unwrap();
+        std::fs::copy(entry.path(), dir.path().join(entry.file_name())).unwrap();
+    }
+
+    // Apply all templates
+    for tmpl in veto::templates::all() {
+        veto::templates::apply(tmpl.id, dir.path()).unwrap();
+    }
+
+    // Verify all policies (base + templates) load and validate
+    let cedar = CedarRuntime::load(dir.path());
+    assert!(
+        cedar.is_ok(),
+        "CedarRuntime should load with all templates applied: {:?}",
+        cedar.err()
+    );
+
+    let cedar = cedar.unwrap();
+    // Should have more policies than base alone
+    let base_cedar = CedarRuntime::load(&policy_src).unwrap();
+    assert!(
+        cedar.policy_count() > base_cedar.policy_count(),
+        "template policies should add to the count: {} vs {}",
+        cedar.policy_count(),
+        base_cedar.policy_count()
+    );
+}
+
+#[test]
+fn template_no_kill_blocks_kill_command() {
+    let dir = tempfile::tempdir().unwrap();
+    let policy_src = policy_dir();
+
+    // Copy base policies
+    for entry in std::fs::read_dir(&policy_src).unwrap() {
+        let entry = entry.unwrap();
+        std::fs::copy(entry.path(), dir.path().join(entry.file_name())).unwrap();
+    }
+
+    // First: kill should be allowed (only killall/pkill blocked by destructive.cedar)
+    let cedar = CedarRuntime::load(dir.path()).unwrap();
+    let payload = json!({
+        "tool_name": "Bash",
+        "tool_input": {"command": "kill 12345"}
+    });
+    let result = adjudicate::adjudicate(&HookKind::BeforeTool, &payload, &cedar).unwrap();
+    // kill (not kill -9, not killall) may be allowed by default policies
+    let before_verdict = result.verdict.as_str().to_string();
+
+    // Apply no-kill template
+    veto::templates::apply("no-kill", dir.path()).unwrap();
+    let cedar = CedarRuntime::load(dir.path()).unwrap();
+
+    let result = adjudicate::adjudicate(&HookKind::BeforeTool, &payload, &cedar).unwrap();
+    assert_eq!(result.verdict.as_str(), "deny", "kill should be denied after no-kill template, was {before_verdict} before");
+}
+
+#[test]
+fn template_read_only_blocks_writes() {
+    let dir = tempfile::tempdir().unwrap();
+    let policy_src = policy_dir();
+
+    for entry in std::fs::read_dir(&policy_src).unwrap() {
+        let entry = entry.unwrap();
+        std::fs::copy(entry.path(), dir.path().join(entry.file_name())).unwrap();
+    }
+
+    // Apply read-only template
+    veto::templates::apply("read-only", dir.path()).unwrap();
+    let cedar = CedarRuntime::load(dir.path()).unwrap();
+
+    // FileWrite should be denied
+    let payload = json!({
+        "tool_name": "Write",
+        "tool_input": {"file_path": "/tmp/safe_file.txt"}
+    });
+    let result = adjudicate::adjudicate(&HookKind::BeforeTool, &payload, &cedar).unwrap();
+    assert_eq!(result.verdict.as_str(), "deny", "file write should be denied in read-only mode");
+
+    // FileRead should still be allowed
+    let payload = json!({
+        "tool_name": "Read",
+        "tool_input": {"file_path": "/tmp/safe_file.txt"}
+    });
+    let result = adjudicate::adjudicate(&HookKind::BeforeTool, &payload, &cedar).unwrap();
+    assert_eq!(result.verdict.as_str(), "allow", "file read should still be allowed");
 }

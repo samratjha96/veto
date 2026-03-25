@@ -125,6 +125,31 @@ enum PolicyCommands {
         /// Policy filename (with or without .cedar extension)
         name: String,
     },
+    /// Browse and apply curated policy templates
+    Template {
+        #[command(subcommand)]
+        command: TemplateCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum TemplateCommands {
+    /// List available policy templates
+    List {
+        /// Filter by category
+        #[arg(long)]
+        category: Option<String>,
+    },
+    /// Show a template's Cedar policy text
+    Show {
+        /// Template id
+        id: String,
+    },
+    /// Apply a template to the policy directory
+    Apply {
+        /// Template id
+        id: String,
+    },
 }
 
 fn socket_path(cli_socket: Option<&PathBuf>) -> PathBuf {
@@ -269,6 +294,17 @@ fn main() -> Result<()> {
             PolicyCommands::Remove { name } => {
                 handle_policy_remove(&name, &socket)?;
             }
+            PolicyCommands::Template { command: tmpl_cmd } => match tmpl_cmd {
+                TemplateCommands::List { category } => {
+                    handle_template_list(category.as_deref())?;
+                }
+                TemplateCommands::Show { id } => {
+                    handle_template_show(&id)?;
+                }
+                TemplateCommands::Apply { id } => {
+                    handle_template_apply(&id, &socket)?;
+                }
+            },
         },
         Commands::Setup { print } => {
             handle_setup(print)?;
@@ -706,6 +742,92 @@ fn truncate(s: &str, max: usize) -> String {
     } else {
         format!("{}...", &s[..max.saturating_sub(3)])
     }
+}
+
+fn handle_template_list(category: Option<&str>) -> Result<()> {
+    let templates = veto::templates::all();
+    let filtered: Vec<_> = match category {
+        Some(cat) => templates.iter().filter(|t| t.category == cat).collect(),
+        None => templates.iter().collect(),
+    };
+
+    if filtered.is_empty() {
+        if let Some(cat) = category {
+            println!("No templates in category '{cat}'.");
+            println!("Available categories: {}", veto::templates::categories().join(", "));
+        } else {
+            println!("No templates available.");
+        }
+        return Ok(());
+    }
+
+    // Group by category
+    let mut by_category: std::collections::BTreeMap<&str, Vec<_>> = std::collections::BTreeMap::new();
+    for t in &filtered {
+        by_category.entry(t.category).or_default().push(*t);
+    }
+
+    for (cat, tmpls) in &by_category {
+        println!("[{cat}]");
+        for t in tmpls {
+            println!("  {:<24} {}", t.id, t.description);
+        }
+        println!();
+    }
+
+    println!("Apply with: veto policy template apply <id>");
+    println!("Preview with: veto policy template show <id>");
+
+    Ok(())
+}
+
+fn handle_template_show(id: &str) -> Result<()> {
+    let tmpl = veto::templates::get(id)
+        .ok_or_else(|| anyhow::anyhow!("unknown template: {id}"))?;
+
+    println!("# {} — {}", tmpl.id, tmpl.description);
+    println!("# Category: {}", tmpl.category);
+    println!("# File: {}", tmpl.filename);
+    println!();
+    print!("{}", tmpl.cedar);
+
+    Ok(())
+}
+
+fn handle_template_apply(id: &str, socket: &std::path::Path) -> Result<()> {
+    let tmpl = veto::templates::get(id)
+        .ok_or_else(|| anyhow::anyhow!("unknown template: {id}"))?;
+
+    let dir = policy_dir();
+    if !dir.is_dir() {
+        bail!("Policy directory not found: {}", dir.display());
+    }
+
+    // Show what we're about to write
+    eprintln!("Template: {} — {}", tmpl.id, tmpl.description);
+    eprintln!("File: {}/{}", dir.display(), tmpl.filename);
+    eprintln!();
+    eprintln!("{}", tmpl.cedar);
+
+    let path = veto::templates::apply(id, &dir)?;
+    eprintln!("Applied: {}", path.display());
+
+    // Try to reload server
+    let request = serde_json::json!({"hook": "reload", "payload": {}});
+    let request_bytes = serde_json::to_vec(&request)?;
+    match send_request(socket, &request_bytes) {
+        Ok(resp) if resp.ok => {
+            if let Some(data) = resp.data {
+                let count = data["policy_count"].as_i64().unwrap_or(0);
+                eprintln!("Server reloaded: {count} policies active");
+            }
+        }
+        Ok(_) | Err(_) => {
+            eprintln!("Note: could not reload server (file watcher will pick up the change)");
+        }
+    }
+
+    Ok(())
 }
 
 fn handle_audit_tail(
