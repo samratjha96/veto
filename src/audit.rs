@@ -96,6 +96,18 @@ impl AuditLog {
         decision_filter: Option<&str>,
         hook_filter: Option<&str>,
     ) -> Result<Vec<AuditEvent>> {
+        self.query_events_since(limit, decision_filter, hook_filter, None)
+    }
+
+    /// Query events with optional filters and a minimum ID (exclusive).
+    /// When `after_id` is Some, only returns events with id > after_id.
+    pub fn query_events_since(
+        &self,
+        limit: usize,
+        decision_filter: Option<&str>,
+        hook_filter: Option<&str>,
+        after_id: Option<i64>,
+    ) -> Result<Vec<AuditEvent>> {
         let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("{e}"))?;
 
         let mut sql = String::from(
@@ -112,6 +124,10 @@ impl AuditLog {
         if let Some(h) = hook_filter {
             conditions.push(format!("hook_type = ?{}", params.len() + 1));
             params.push(Box::new(h.to_string()));
+        }
+        if let Some(id) = after_id {
+            conditions.push(format!("id > ?{}", params.len() + 1));
+            params.push(Box::new(id));
         }
 
         if !conditions.is_empty() {
@@ -144,6 +160,15 @@ impl AuditLog {
             events.push(row.context("read event row")?);
         }
         Ok(events)
+    }
+
+    /// Get the highest event ID, or 0 if no events exist.
+    pub fn max_id(&self) -> Result<i64> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("{e}"))?;
+        let id: i64 = conn
+            .query_row("SELECT COALESCE(MAX(id), 0) FROM events", [], |row| row.get(0))
+            .context("max id")?;
+        Ok(id)
     }
 }
 
@@ -266,6 +291,34 @@ mod tests {
             .unwrap();
         assert_eq!(log.event_count().unwrap(), 1);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn query_events_since_filters_by_id() {
+        let (log, _path) = temp_db();
+        for i in 0..5 {
+            log.log_event("pre-tool-use", Some("Bash"), Some(&format!("cmd-{i}")), "allow", None, None, None)
+                .unwrap();
+        }
+        // Get events after id 3 — should get ids 4 and 5
+        let events = log.query_events_since(10, None, None, Some(3)).unwrap();
+        assert_eq!(events.len(), 2);
+        assert!(events.iter().all(|e| e.id > 3));
+    }
+
+    #[test]
+    fn max_id_empty_db() {
+        let (log, _path) = temp_db();
+        assert_eq!(log.max_id().unwrap(), 0);
+    }
+
+    #[test]
+    fn max_id_after_inserts() {
+        let (log, _path) = temp_db();
+        for _ in 0..3 {
+            log.log_event("test", None, None, "allow", None, None, None).unwrap();
+        }
+        assert_eq!(log.max_id().unwrap(), 3);
     }
 
     #[test]

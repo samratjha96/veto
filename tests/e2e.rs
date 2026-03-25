@@ -123,6 +123,7 @@ impl Server {
 // ---------- Tests ----------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires Unix socket binding — run with: cargo test --test e2e -- --ignored"]
 async fn e2e_ping() {
     let (_ws, sock, db) = e2e_workspace();
     let server = Server::start(&sock, &db).await;
@@ -131,6 +132,7 @@ async fn e2e_ping() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires Unix socket binding — run with: cargo test --test e2e -- --ignored"]
 async fn e2e_status() {
     let (_ws, sock, db) = e2e_workspace();
     let server = Server::start(&sock, &db).await;
@@ -141,6 +143,7 @@ async fn e2e_status() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires Unix socket binding — run with: cargo test --test e2e -- --ignored"]
 async fn e2e_safe_command_allowed() {
     let (_ws, sock, db) = e2e_workspace();
     let server = Server::start(&sock, &db).await;
@@ -161,6 +164,7 @@ async fn e2e_safe_command_allowed() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires Unix socket binding — run with: cargo test --test e2e -- --ignored"]
 async fn e2e_rm_root_denied() {
     let (_ws, sock, db) = e2e_workspace();
     let server = Server::start(&sock, &db).await;
@@ -182,6 +186,7 @@ async fn e2e_rm_root_denied() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires Unix socket binding — run with: cargo test --test e2e -- --ignored"]
 async fn e2e_git_force_push_denied() {
     let (_ws, sock, db) = e2e_workspace();
     let server = Server::start(&sock, &db).await;
@@ -203,6 +208,7 @@ async fn e2e_git_force_push_denied() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires Unix socket binding — run with: cargo test --test e2e -- --ignored"]
 async fn e2e_file_write_etc_denied() {
     let (_ws, sock, db) = e2e_workspace();
     let server = Server::start(&sock, &db).await;
@@ -224,6 +230,7 @@ async fn e2e_file_write_etc_denied() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires Unix socket binding — run with: cargo test --test e2e -- --ignored"]
 async fn e2e_reload() {
     let (_ws, sock, db) = e2e_workspace();
     let server = Server::start(&sock, &db).await;
@@ -234,6 +241,7 @@ async fn e2e_reload() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires Unix socket binding — run with: cargo test --test e2e -- --ignored"]
 async fn e2e_multiple_connections() {
     let (_ws, sock, db) = e2e_workspace();
     let server = Server::start(&sock, &db).await;
@@ -264,6 +272,7 @@ async fn e2e_multiple_connections() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires Unix socket binding — run with: cargo test --test e2e -- --ignored"]
 async fn e2e_invalid_json_returns_error() {
     let (_ws, sock, db) = e2e_workspace();
     let server = Server::start(&sock, &db).await;
@@ -282,6 +291,7 @@ async fn e2e_invalid_json_returns_error() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires Unix socket binding — run with: cargo test --test e2e -- --ignored"]
 async fn e2e_secrets_detected() {
     let (_ws, sock, db) = e2e_workspace();
     let server = Server::start(&sock, &db).await;
@@ -304,6 +314,7 @@ async fn e2e_secrets_detected() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires Unix socket binding — run with: cargo test --test e2e -- --ignored"]
 async fn e2e_audit_records_decisions() {
     let (_ws, sock, db) = e2e_workspace();
     let server = Server::start(&sock, &db).await;

@@ -59,6 +59,12 @@ enum Commands {
         /// Output as JSON
         #[arg(long)]
         json: bool,
+        /// Stream new events as they arrive (like tail -f)
+        #[arg(long)]
+        tail: bool,
+        /// Poll interval in seconds for --tail mode
+        #[arg(long, default_value = "1")]
+        interval: u64,
     },
 }
 
@@ -232,8 +238,20 @@ fn main() -> Result<()> {
             decision,
             hook_type,
             json,
+            tail,
+            interval,
         } => {
-            handle_audit(limit, decision.as_deref(), hook_type.as_deref(), json)?;
+            if tail {
+                handle_audit_tail(
+                    limit,
+                    decision.as_deref(),
+                    hook_type.as_deref(),
+                    json,
+                    interval,
+                )?;
+            } else {
+                handle_audit(limit, decision.as_deref(), hook_type.as_deref(), json)?;
+            }
         }
     }
 
@@ -474,6 +492,78 @@ fn handle_setup(print_only: bool) -> Result<()> {
     eprintln!();
     eprintln!("Make sure veto-server is running before starting Claude Code.");
 
+    Ok(())
+}
+
+fn handle_audit_tail(
+    initial_limit: usize,
+    decision: Option<&str>,
+    hook_type: Option<&str>,
+    as_json: bool,
+    interval_secs: u64,
+) -> Result<()> {
+    let db_path = db_path();
+    if !db_path.exists() {
+        bail!("Audit database not found: {}", db_path.display());
+    }
+
+    let audit = AuditLog::open(&db_path)
+        .with_context(|| format!("open {}", db_path.display()))?;
+
+    // Print header unless JSON mode
+    if !as_json {
+        println!(
+            "{:<5} {:<20} {:<15} {:<10} {:<8} {}",
+            "ID", "TIMESTAMP", "HOOK", "TOOL", "DECISION", "SUMMARY"
+        );
+        println!("{}", "-".repeat(80));
+    }
+
+    // Show recent events first
+    let initial = audit.query_events(initial_limit, decision, hook_type)?;
+    let mut last_id = 0i64;
+    // Print in chronological order (query returns newest-first)
+    for e in initial.iter().rev() {
+        print_event(e, as_json)?;
+        if e.id > last_id {
+            last_id = e.id;
+        }
+    }
+    // If no initial events, start from current max
+    if last_id == 0 {
+        last_id = audit.max_id()?;
+    }
+
+    let interval = std::time::Duration::from_secs(interval_secs);
+    loop {
+        std::thread::sleep(interval);
+        let new_events = audit.query_events_since(100, decision, hook_type, Some(last_id))?;
+        // Print in chronological order
+        for e in new_events.iter().rev() {
+            print_event(e, as_json)?;
+            if e.id > last_id {
+                last_id = e.id;
+            }
+        }
+    }
+}
+
+fn print_event(e: &veto::audit::AuditEvent, as_json: bool) -> Result<()> {
+    if as_json {
+        println!("{}", serde_json::to_string(e)?);
+    } else {
+        let tool = e.tool_name.as_deref().unwrap_or("-");
+        let summary = e.action_summary.as_deref().unwrap_or("-");
+        let summary_short = if summary.len() > 40 {
+            format!("{}...", &summary[..37])
+        } else {
+            summary.to_string()
+        };
+        println!(
+            "{:<5} {:<20} {:<15} {:<10} {:<8} {}",
+            e.id, e.timestamp, e.hook_type, tool, e.decision, summary_short
+        );
+    }
     Ok(())
 }
 
