@@ -1,0 +1,97 @@
+// Veto Cedar schema — simplified stateless per-action evaluation.
+//
+// No Trajectory, Message, Label, Taint, or File entities.
+// Entities are built fresh per request.
+
+// Principal: the AI coding agent.
+entity Agent = {
+    provider_id: String,
+};
+
+// Resource: generic resource for all actions.
+entity Resource;
+
+// YARA scan results.
+type SignatureContext = {
+    match_count: Long,
+    categories: Set<String>,
+    severity: Long,
+};
+
+// Process context for kill-command awareness.
+type ProcessContext = {
+    has_long_running_process: Bool,
+    longest_process_runtime_seconds: Long,
+};
+
+// ShellCommand context (pre-execution).
+type ShellCommandContext = {
+    command: String,
+    working_dir: String,
+    signature: SignatureContext,
+    has_long_running_process: Bool,
+    longest_process_runtime_seconds: Long,
+};
+
+action "ShellCommand" appliesTo {
+    principal: [Agent],
+    resource: [Resource],
+    context: ShellCommandContext,
+};
+
+// WebFetch context (pre-execution).
+type WebFetchContext = {
+    url: String,
+    signature: SignatureContext,
+};
+
+action "WebFetch" appliesTo {
+    principal: [Agent],
+    resource: [Resource],
+    context: WebFetchContext,
+};
+
+// File operation contexts.
+type FileReadContext = {
+    path: String,
+    signature: SignatureContext,
+};
+
+action "FileRead" appliesTo {
+    principal: [Agent],
+    resource: [Resource],
+    context: FileReadContext,
+};
+
+type FileWriteContext = {
+    path: String,
+    signature: SignatureContext,
+};
+
+action "FileWrite" appliesTo {
+    principal: [Agent],
+    resource: [Resource],
+    context: FileWriteContext,
+};
+
+type FileEditContext = {
+    path: String,
+    signature: SignatureContext,
+};
+
+action "FileEdit" appliesTo {
+    principal: [Agent],
+    resource: [Resource],
+    context: FileEditContext,
+};
+
+type FileDeleteContext = {
+    path: String,
+    signature: SignatureContext,
+};
+
+action "FileDelete" appliesTo {
+    principal: [Agent],
+    resource: [Resource],
+    context: FileDeleteContext,
+};

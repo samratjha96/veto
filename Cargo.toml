@@ -1,0 +1,30 @@
+[package]
+name = "veto"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "veto-server"
+path = "src/bin/server.rs"
+
+[[bin]]
+name = "veto"
+path = "src/bin/cli.rs"
+
+[dependencies]
+anyhow = "1"
+cedar-policy = "4"
+clap = { version = "4", features = ["derive", "env"] }
+dirs = "6"
+include_dir = "0.7"
+notify = { version = "7", features = ["macos_fsevent"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+rusqlite = { version = "0.37", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sysinfo = "0.34"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+yara-x = "1"
