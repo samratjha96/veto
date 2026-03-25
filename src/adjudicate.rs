@@ -8,12 +8,20 @@ use crate::signature::{self, Severity, SignatureContext};
 use anyhow::Result;
 use serde_json::Value;
 
+/// Result of adjudication, including context for audit logging.
+pub struct AdjudicationResult {
+    pub verdict: Verdict,
+    pub sig: SignatureContext,
+    /// The text that was scanned (command, path, url, etc.) — useful for audit.
+    pub scan_text: String,
+}
+
 /// Run the full adjudication pipeline for a hook event.
 pub fn adjudicate(
     kind: &HookKind,
     hook_payload: &Value,
     cedar: &CedarRuntime,
-) -> Result<(Verdict, SignatureContext)> {
+) -> Result<AdjudicationResult> {
     // 1. Extract scan text from the hook payload.
     let scan_text = payload::scan_target(kind, hook_payload);
     let tool_name = payload::tool_name(hook_payload);
@@ -53,7 +61,11 @@ pub fn adjudicate(
         Verdict::Allow
     };
 
-    Ok((verdict, sig))
+    Ok(AdjudicationResult {
+        verdict,
+        sig,
+        scan_text,
+    })
 }
 
 fn is_kill_command(text: &str) -> bool {
@@ -93,9 +105,9 @@ mod tests {
             "tool_name": "Bash",
             "tool_input": {"command": "echo hello"}
         });
-        let (verdict, sig) = adjudicate(&HookKind::BeforeTool, &payload, &cedar).unwrap();
-        assert_eq!(verdict, Verdict::Allow);
-        assert!(sig.matches.is_empty());
+        let result = adjudicate(&HookKind::BeforeTool, &payload, &cedar).unwrap();
+        assert_eq!(result.verdict, Verdict::Allow);
+        assert!(result.sig.matches.is_empty());
     }
 
     #[test]
@@ -105,8 +117,8 @@ mod tests {
             "tool_name": "Bash",
             "tool_input": {"command": "rm -rf /"}
         });
-        let (verdict, _) = adjudicate(&HookKind::BeforeTool, &payload, &cedar).unwrap();
-        assert!(matches!(verdict, Verdict::Deny { .. }));
+        let result = adjudicate(&HookKind::BeforeTool, &payload, &cedar).unwrap();
+        assert!(matches!(result.verdict, Verdict::Deny { .. }));
     }
 
     #[test]
@@ -116,8 +128,8 @@ mod tests {
             "tool_name": "Bash",
             "tool_input": {"command": "git push --force origin main"}
         });
-        let (verdict, _) = adjudicate(&HookKind::BeforeTool, &payload, &cedar).unwrap();
-        assert!(matches!(verdict, Verdict::Deny { .. }));
+        let result = adjudicate(&HookKind::BeforeTool, &payload, &cedar).unwrap();
+        assert!(matches!(result.verdict, Verdict::Deny { .. }));
     }
 
     #[test]
@@ -128,13 +140,14 @@ mod tests {
             "tool_name": "Bash",
             "tool_input": {"command": "rm -rf node_modules/"}
         });
-        let (verdict, sig) = adjudicate(&HookKind::BeforeTool, &payload, &cedar).unwrap();
+        let result = adjudicate(&HookKind::BeforeTool, &payload, &cedar).unwrap();
         // YARA detects destructive_recursive_rm (high severity), so at minimum Ask
         assert!(
-            matches!(verdict, Verdict::Ask { .. } | Verdict::Deny { .. }),
-            "destructive rm should trigger Ask or Deny, got {verdict:?}"
+            matches!(result.verdict, Verdict::Ask { .. } | Verdict::Deny { .. }),
+            "destructive rm should trigger Ask or Deny, got {:?}",
+            result.verdict
         );
-        assert!(sig.severity >= Severity::High);
+        assert!(result.sig.severity >= Severity::High);
     }
 
     #[test]

@@ -276,7 +276,6 @@ mod tests {
 
     #[test]
     fn open_creates_parent_dirs() {
-        use std::sync::atomic::Ordering;
         let dir = std::env::temp_dir().join(format!(
             "veto-audit-nested-{}-{}",
             std::process::id(),

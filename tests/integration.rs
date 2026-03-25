@@ -429,6 +429,50 @@ fn empty_payload_doesnt_crash() {
 }
 
 #[test]
+fn audit_captures_action_summary() {
+    let cedar = CedarRuntime::load(&policy_dir()).unwrap();
+    let (audit, _) = temp_db();
+
+    // Allowed command: summary should contain the command text
+    let safe = make_request(
+        "pre-tool-use",
+        json!({"tool_name": "Bash", "tool_input": {"command": "echo audit_test"}}),
+    );
+    handle_request(&cedar, &audit, &safe);
+
+    // Denied command: summary should contain the command text, policy_id should be set
+    let dangerous = make_request(
+        "pre-tool-use",
+        json!({"tool_name": "Bash", "tool_input": {"command": "rm -rf /"}}),
+    );
+    handle_request(&cedar, &audit, &dangerous);
+
+    let events = audit.query_events(10, None, None).unwrap();
+    assert_eq!(events.len(), 2);
+
+    // Newest first — event[0] is the deny, event[1] is the allow
+    let deny_event = &events[0];
+    assert_eq!(deny_event.decision, "deny");
+    assert!(
+        deny_event.action_summary.as_deref().unwrap().contains("rm -rf /"),
+        "deny action_summary should contain command: {:?}",
+        deny_event.action_summary
+    );
+    assert!(
+        deny_event.policy_id.is_some(),
+        "deny event should have policy_id"
+    );
+
+    let allow_event = &events[1];
+    assert_eq!(allow_event.decision, "allow");
+    assert!(
+        allow_event.action_summary.as_deref().unwrap().contains("echo audit_test"),
+        "allow action_summary should contain command: {:?}",
+        allow_event.action_summary
+    );
+}
+
+#[test]
 fn unknown_hook_type_handled() {
     let cedar = CedarRuntime::load(&policy_dir()).unwrap();
     let (audit, _) = temp_db();

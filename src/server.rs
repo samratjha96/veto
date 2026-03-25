@@ -44,17 +44,34 @@ pub fn handle_request(
                 .map(|s| s.to_string());
 
             match adjudicate::adjudicate(&kind, &request.payload, cedar) {
-                Ok((verdict, sig)) => {
+                Ok(result) => {
                     let categories: Vec<&str> =
-                        sig.categories.iter().map(|s| s.as_str()).collect();
+                        result.sig.categories.iter().map(|s| s.as_str()).collect();
                     let cats_str = categories.join(",");
-                    let sev_str = sig.severity.to_string();
+                    let sev_str = result.sig.severity.to_string();
+
+                    // Build action summary: short description of what was evaluated.
+                    // Truncate long scan text to keep audit readable.
+                    let scan_trimmed = result.scan_text.trim().to_string();
+                    let summary_text = if scan_trimmed.is_empty() {
+                        None
+                    } else if scan_trimmed.len() > 200 {
+                        Some(format!("{}...", &scan_trimmed[..197]))
+                    } else {
+                        Some(scan_trimmed)
+                    };
+                    let summary = summary_text.as_deref();
+                    let policy_id = match &result.verdict {
+                        crate::hook::Verdict::Deny { reason } => Some(reason.as_str()),
+                        _ => None,
+                    };
+
                     let _ = audit.log_event(
                         hook_type,
                         tool_name.as_deref(),
-                        verdict.reason(),
-                        verdict.as_str(),
-                        None,
+                        summary,
+                        result.verdict.as_str(),
+                        policy_id,
                         if categories.is_empty() {
                             None
                         } else {
@@ -63,7 +80,7 @@ pub fn handle_request(
                         Some(&sev_str),
                     );
 
-                    let hook_response = claude_response::encode(&verdict, hook_type);
+                    let hook_response = claude_response::encode(&result.verdict, hook_type);
                     AdjudicateOk::success(hook_response)
                 }
                 Err(e) => {
