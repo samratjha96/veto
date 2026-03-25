@@ -33,6 +33,20 @@ enum Commands {
     Status,
     /// Ping server
     Ping,
+    /// Manage policies
+    Policy {
+        #[command(subcommand)]
+        command: PolicyCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum PolicyCommands {
+    /// Generate a Cedar policy from natural language
+    Add {
+        /// Natural language description of the policy
+        description: String,
+    },
 }
 
 fn socket_path(cli_socket: Option<&PathBuf>) -> PathBuf {
@@ -44,6 +58,12 @@ fn socket_path(cli_socket: Option<&PathBuf>) -> PathBuf {
     }
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
     home.join(".veto/veto.sock")
+}
+
+fn policy_dir() -> PathBuf {
+    std::env::var("VETO_POLICY_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("./policies"))
 }
 
 fn send_request(socket: &std::path::Path, request_json: &[u8]) -> Result<AdjudicateOk> {
@@ -123,6 +143,81 @@ fn main() -> Result<()> {
                 eprintln!("Error: {}", response.error.unwrap_or_default());
                 std::process::exit(1);
             }
+        }
+        Commands::Policy { command } => match command {
+            PolicyCommands::Add { description } => {
+                // Build an async runtime for this one-shot operation
+                let rt = tokio::runtime::Runtime::new().context("create tokio runtime")?;
+                rt.block_on(handle_policy_add(&description, &socket))?;
+            }
+        },
+    }
+
+    Ok(())
+}
+
+async fn handle_policy_add(description: &str, socket: &std::path::Path) -> Result<()> {
+    let api_key = std::env::var("API_KEY")
+        .context("API_KEY env var required for policy generation")?;
+    let model = std::env::var("VETO_MODEL")
+        .unwrap_or_else(|_| "openai/openai/gpt-5.4-mini".to_string());
+
+    let llm = veto::llm::LlmClient::new(&api_key, &model);
+    let dir = policy_dir();
+
+    eprintln!("Generating Cedar policy from: \"{description}\"");
+    eprintln!("Using model: {model}");
+
+    let generated = veto::policy_gen::generate(&llm, &dir, description).await?;
+
+    // Validate the generated policy
+    match veto::policy_gen::validate_policy(&generated.cedar_text, &dir) {
+        Ok(()) => {
+            eprintln!("Policy validates against schema.");
+        }
+        Err(e) => {
+            eprintln!("WARNING: Generated policy may have validation issues: {e}");
+            eprintln!("Proceeding anyway — you can edit the file after saving.");
+        }
+    }
+
+    // Display the policy
+    println!("\n--- Generated Policy: {} ---\n", generated.policy_id);
+    println!("{}", generated.cedar_text);
+    println!("\n--- End Policy ---\n");
+
+    // Ask for confirmation
+    eprint!("Save to {}/{}? [Enter to confirm, Ctrl+C to cancel] ", dir.display(), generated.file_name);
+
+    let mut confirm = String::new();
+    std::io::stdin()
+        .read_line(&mut confirm)
+        .context("read confirmation")?;
+
+    // Write the policy file
+    let policy_path = dir.join(&generated.file_name);
+    std::fs::write(&policy_path, &generated.cedar_text)
+        .with_context(|| format!("write {}", policy_path.display()))?;
+    eprintln!("Saved: {}", policy_path.display());
+
+    // Try to notify the server to reload
+    let request = serde_json::json!({"hook": "reload", "payload": {}});
+    let request_bytes = serde_json::to_vec(&request)?;
+    match send_request(socket, &request_bytes) {
+        Ok(resp) if resp.ok => {
+            if let Some(data) = resp.data {
+                let count = data["policy_count"].as_i64().unwrap_or(0);
+                eprintln!("Server reloaded: {count} policies active");
+            }
+        }
+        Ok(resp) => {
+            eprintln!(
+                "Server reload failed: {}",
+                resp.error.unwrap_or_default()
+            );
+        }
+        Err(_) => {
+            eprintln!("Note: could not reach veto-server for reload (file watcher will pick up the change)");
         }
     }
 

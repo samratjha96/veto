@@ -5,6 +5,8 @@ pub mod cedar_runtime;
 pub mod config;
 pub mod hook;
 pub mod ipc;
+pub mod llm;
+pub mod policy_gen;
 pub mod process_context;
 pub mod signature;
 pub mod watcher;
