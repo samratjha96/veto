@@ -57,6 +57,8 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Diagnose setup: check policies, YARA, server, hooks, audit DB
+    Doctor,
     /// Query the audit log
     Audit {
         /// Max events to show
@@ -259,6 +261,16 @@ fn main() -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&json_results)?);
             } else {
                 veto::bench::print_results(&results);
+            }
+        }
+        Commands::Doctor => {
+            let pd = policy_dir();
+            let db = db_path();
+            let checks = veto::doctor::run_all(&pd, &socket, &db);
+            veto::doctor::print_results(&checks);
+            let has_fail = checks.iter().any(|c| c.status == veto::doctor::CheckStatus::Fail);
+            if has_fail {
+                std::process::exit(1);
             }
         }
         Commands::Audit {
