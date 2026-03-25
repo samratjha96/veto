@@ -102,8 +102,35 @@ fn db_path() -> PathBuf {
 }
 
 fn send_request(socket: &std::path::Path, request_json: &[u8]) -> Result<AdjudicateOk> {
-    let mut stream = UnixStream::connect(socket)
-        .with_context(|| format!("connect to {}", socket.display()))?;
+    let mut stream = UnixStream::connect(socket).map_err(|e| {
+        match e.kind() {
+            std::io::ErrorKind::NotFound => {
+                anyhow::anyhow!(
+                    "veto-server is not running (socket not found: {})\n\
+                     Start it with: veto-server",
+                    socket.display()
+                )
+            }
+            std::io::ErrorKind::ConnectionRefused => {
+                anyhow::anyhow!(
+                    "veto-server socket exists but connection refused ({})\n\
+                     The server may have crashed. Try restarting: veto-server",
+                    socket.display()
+                )
+            }
+            _ => {
+                anyhow::anyhow!("connect to {}: {e}", socket.display())
+            }
+        }
+    })?;
+
+    // Set timeouts to avoid hanging indefinitely
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(30)))
+        .ok();
+    stream
+        .set_write_timeout(Some(std::time::Duration::from_secs(10)))
+        .ok();
 
     ipc::write_frame(&mut stream, request_json).context("write request")?;
     let response_bytes = ipc::read_frame(&mut stream).context("read response")?;

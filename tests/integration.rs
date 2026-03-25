@@ -4,11 +4,11 @@
 use serde_json::json;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use veto::adjudicate;
 use veto::audit::AuditLog;
 use veto::cedar_runtime::CedarRuntime;
-use veto::hook::{HookKind, Verdict};
+use veto::hook::Verdict;
 use veto::ipc::{AdjudicateOk, AdjudicateRequest};
+use veto::server;
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -28,59 +28,12 @@ fn temp_db() -> (AuditLog, PathBuf) {
     (log, path)
 }
 
-/// Simulate the server's request handling logic.
 fn handle_request(
     cedar: &CedarRuntime,
     audit: &AuditLog,
     request: &AdjudicateRequest,
 ) -> AdjudicateOk {
-    match request.hook.as_str() {
-        "ping" => AdjudicateOk::pong(),
-        "reload" => match cedar.reload() {
-            Ok(count) => AdjudicateOk::data(json!({"reloaded": true, "policy_count": count})),
-            Err(e) => AdjudicateOk::failure(format!("reload failed: {e}")),
-        },
-        "status" => AdjudicateOk::data(json!({
-            "status": "ok",
-            "policy_count": cedar.policy_count(),
-            "event_count": audit.event_count().unwrap_or(-1),
-        })),
-        hook_type => {
-            let kind = HookKind::from_hook_str(hook_type);
-            let tool_name = request
-                .payload
-                .get("tool_name")
-                .and_then(|t| t.as_str())
-                .map(|s| s.to_string());
-
-            match adjudicate::adjudicate(&kind, &request.payload, cedar) {
-                Ok((verdict, sig)) => {
-                    let categories: Vec<&str> =
-                        sig.categories.iter().map(|s| s.as_str()).collect();
-                    let cats_str = categories.join(",");
-                    let sev_str = sig.severity.to_string();
-                    let _ = audit.log_event(
-                        hook_type,
-                        tool_name.as_deref(),
-                        verdict.reason(),
-                        verdict.as_str(),
-                        None,
-                        if categories.is_empty() {
-                            None
-                        } else {
-                            Some(&cats_str)
-                        },
-                        Some(&sev_str),
-                    );
-
-                    let hook_response =
-                        veto::adapters::claude::response::encode(&verdict, hook_type);
-                    AdjudicateOk::success(hook_response)
-                }
-                Err(e) => AdjudicateOk::failure(format!("adjudication error: {e}")),
-            }
-        }
-    }
+    server::handle_request(request, cedar, audit)
 }
 
 fn make_request(hook: &str, payload: serde_json::Value) -> AdjudicateRequest {

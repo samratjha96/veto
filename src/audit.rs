@@ -246,4 +246,32 @@ mod tests {
         let events = log.query_events(10, None, None).unwrap();
         assert!(events.is_empty());
     }
+
+    #[test]
+    fn open_creates_parent_dirs() {
+        use std::sync::atomic::Ordering;
+        let dir = std::env::temp_dir().join(format!(
+            "veto-audit-nested-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let deep_path = dir.join("a").join("b").join("audit.db");
+        let log = AuditLog::open(&deep_path).unwrap();
+        log.log_event("test", None, None, "allow", None, None, None)
+            .unwrap();
+        assert_eq!(log.event_count().unwrap(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn query_with_limit_zero_returns_nothing() {
+        let (log, _path) = temp_db();
+        log.log_event("pre-tool-use", Some("Bash"), Some("ls"), "allow", None, None, None)
+            .unwrap();
+        let events = log.query_events(0, None, None).unwrap();
+        assert!(events.is_empty());
+    }
 }

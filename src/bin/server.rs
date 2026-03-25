@@ -1,17 +1,14 @@
 //! veto-server: long-lived daemon listening on Unix domain socket.
 
 use anyhow::{Context, Result};
-use serde_json::json;
 use std::sync::Arc;
 use tokio::net::UnixListener;
-use tracing::{error, info};
-use veto::adapters::claude::response as claude_response;
-use veto::adjudicate;
+use tokio::sync::watch;
+use tracing::info;
 use veto::audit::AuditLog;
 use veto::cedar_runtime::CedarRuntime;
 use veto::config::Config;
-use veto::hook::HookKind;
-use veto::ipc::{self, AdjudicateOk, AdjudicateRequest};
+use veto::server;
 use veto::watcher;
 
 #[tokio::main]
@@ -54,100 +51,20 @@ async fn main() -> Result<()> {
         .with_context(|| format!("bind {}", config.socket_path.display()))?;
     info!(socket = %config.socket_path.display(), "Listening");
 
+    // Shutdown via Ctrl+C
+    let (shutdown_tx, shutdown_rx) = watch::channel(());
     let socket_path = config.socket_path.clone();
-    loop {
-        tokio::select! {
-            result = listener.accept() => {
-                let (stream, _) = result?;
-                let (mut reader, mut writer) = stream.into_split();
 
-                // Read request frame
-                let frame = match ipc::read_frame_async(&mut reader).await {
-                    Ok(f) => f,
-                    Err(e) => {
-                        error!(error = %e, "failed to read frame");
-                        continue;
-                    }
-                };
+    tokio::spawn(async move {
+        let _ = tokio::signal::ctrl_c().await;
+        info!("Received shutdown signal");
+        let _ = shutdown_tx.send(());
+    });
 
-                let request: AdjudicateRequest = match serde_json::from_slice(&frame) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        let resp = AdjudicateOk::failure(format!("invalid JSON: {e}"));
-                        let body = serde_json::to_vec(&resp).unwrap_or_default();
-                        let _ = ipc::write_frame_async(&mut writer, &body).await;
-                        continue;
-                    }
-                };
+    server::run_accept_loop(listener, cedar, audit, shutdown_rx).await;
 
-                let response = match request.hook.as_str() {
-                    "ping" => AdjudicateOk::pong(),
-                    "reload" => match cedar.reload() {
-                        Ok(count) => {
-                            info!(policies = count, "Policies reloaded");
-                            AdjudicateOk::data(json!({"reloaded": true, "policy_count": count}))
-                        }
-                        Err(e) => AdjudicateOk::failure(format!("reload failed: {e}")),
-                    },
-                    "status" => AdjudicateOk::data(json!({
-                        "status": "ok",
-                        "policy_count": cedar.policy_count(),
-                        "event_count": audit.event_count().unwrap_or(-1),
-                    })),
-                    hook_type => {
-                        let kind = HookKind::from_hook_str(hook_type);
-                        let tool_name = request
-                            .payload
-                            .get("tool_name")
-                            .and_then(|t| t.as_str())
-                            .map(|s| s.to_string());
-
-                        match adjudicate::adjudicate(&kind, &request.payload, &cedar) {
-                            Ok((verdict, sig)) => {
-                                let categories: Vec<&str> =
-                                    sig.categories.iter().map(|s| s.as_str()).collect();
-
-                                // Log to audit
-                                let cats_str = categories.join(",");
-                                let sev_str = sig.severity.to_string();
-                                let _ = audit.log_event(
-                                    hook_type,
-                                    tool_name.as_deref(),
-                                    verdict.reason(),
-                                    verdict.as_str(),
-                                    None,
-                                    if categories.is_empty() {
-                                        None
-                                    } else {
-                                        Some(&cats_str)
-                                    },
-                                    Some(&sev_str),
-                                );
-
-                                let hook_response = claude_response::encode(&verdict, hook_type);
-                                AdjudicateOk::success(hook_response)
-                            }
-                            Err(e) => {
-                                error!(error = %e, "adjudication failed");
-                                AdjudicateOk::failure(format!("adjudication error: {e}"))
-                            }
-                        }
-                    }
-                };
-
-                let body = serde_json::to_vec(&response).unwrap_or_default();
-                if let Err(e) = ipc::write_frame_async(&mut writer, &body).await {
-                    error!(error = %e, "failed to write response");
-                }
-            }
-            _ = tokio::signal::ctrl_c() => {
-                info!("Received shutdown signal");
-                let _ = std::fs::remove_file(&socket_path);
-                info!("Cleaned up socket, exiting");
-                break;
-            }
-        }
-    }
+    let _ = std::fs::remove_file(&socket_path);
+    info!("Cleaned up socket, exiting");
 
     Ok(())
 }

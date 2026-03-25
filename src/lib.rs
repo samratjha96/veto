@@ -9,4 +9,5 @@ pub mod llm;
 pub mod policy_gen;
 pub mod process_context;
 pub mod signature;
+pub mod server;
 pub mod watcher;

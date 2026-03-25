@@ -113,6 +113,8 @@ impl CedarRuntime {
     }
 
     /// Reload policies from disk. Returns the new policy count.
+    ///
+    /// If reload fails, the previous policies remain active (fail-safe).
     pub fn reload(&self) -> Result<usize> {
         let (policy_set, schema) = load_policies_and_schema(&self.policy_dir)?;
         let count = policy_set.policies().count();
@@ -120,6 +122,11 @@ impl CedarRuntime {
         inner.policy_set = policy_set;
         inner.schema = schema;
         Ok(count)
+    }
+
+    /// Path to the policy directory.
+    pub fn policy_dir(&self) -> &std::path::Path {
+        &self.policy_dir
     }
 
     /// Number of loaded policies.
@@ -328,5 +335,77 @@ mod tests {
         let rt = test_runtime();
         let count = rt.reload().unwrap();
         assert!(count > 0);
+    }
+
+    #[test]
+    fn load_missing_dir_fails() {
+        let result = CedarRuntime::load(Path::new("/nonexistent/dir"));
+        let msg = result.err().expect("should fail").to_string();
+        assert!(
+            msg.contains("nonexistent"),
+            "error should mention the missing dir: {msg}"
+        );
+    }
+
+    #[test]
+    fn load_empty_dir_fails() {
+        let dir = std::env::temp_dir().join(format!(
+            "veto-empty-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let result = CedarRuntime::load(&dir);
+        let msg = result.err().expect("should fail").to_string();
+        assert!(
+            msg.contains("no .cedarschema"),
+            "error should mention missing schema: {msg}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn reload_preserves_policies_on_bad_file() {
+        // Copy the policy dir to a temp location so we don't interfere with other tests
+        let tmp_dir = std::env::temp_dir().join(format!(
+            "veto-badpolicy-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp_dir).unwrap();
+
+        // Copy schema and policies
+        let src_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("policies");
+        for entry in std::fs::read_dir(&src_dir).unwrap() {
+            let entry = entry.unwrap();
+            let dest = tmp_dir.join(entry.file_name());
+            std::fs::copy(entry.path(), dest).unwrap();
+        }
+
+        let rt = CedarRuntime::load(&tmp_dir).expect("load copied policies");
+        let original_count = rt.policy_count();
+        assert!(original_count > 0);
+
+        // Write a bad cedar file into the temp dir
+        let bad_path = tmp_dir.join("bad_test.cedar");
+        std::fs::write(&bad_path, "this is not valid cedar at all!!!").unwrap();
+
+        // Reload should fail
+        let result = rt.reload();
+        assert!(result.is_err(), "reload with bad policy should fail");
+
+        // Original policies should still be active (fail-safe)
+        assert_eq!(
+            rt.policy_count(),
+            original_count,
+            "original policies should be preserved after failed reload"
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp_dir);
     }
 }
