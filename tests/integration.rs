@@ -384,3 +384,56 @@ fn secrets_in_command_detected() {
         );
     }
 }
+
+#[test]
+fn concurrent_requests_dont_corrupt_audit() {
+    use std::sync::Arc;
+    use std::thread;
+
+    let cedar = Arc::new(CedarRuntime::load(&policy_dir()).unwrap());
+    let (audit, _) = temp_db();
+    let audit = Arc::new(audit);
+
+    let mut handles = Vec::new();
+    for i in 0..10 {
+        let cedar = Arc::clone(&cedar);
+        let audit = Arc::clone(&audit);
+        handles.push(thread::spawn(move || {
+            let cmd = if i % 2 == 0 { "echo safe" } else { "rm -rf /" };
+            let req = serde_json::from_value(json!({
+                "hook": "pre-tool-use",
+                "payload": {"tool_name": "Bash", "tool_input": {"command": cmd}}
+            }))
+            .unwrap();
+            let resp = server::handle_request(&req, &cedar, &audit);
+            assert!(resp.ok);
+        }));
+    }
+
+    for h in handles {
+        h.join().unwrap();
+    }
+
+    let count = audit.event_count().unwrap();
+    assert_eq!(count, 10, "all 10 requests should be audited, got {count}");
+}
+
+#[test]
+fn empty_payload_doesnt_crash() {
+    let cedar = CedarRuntime::load(&policy_dir()).unwrap();
+    let (audit, _) = temp_db();
+    let req = make_request("pre-tool-use", json!({}));
+    let resp = handle_request(&cedar, &audit, &req);
+    // Should not panic — may allow (no tool_name detected) or handle gracefully
+    assert!(resp.ok);
+}
+
+#[test]
+fn unknown_hook_type_handled() {
+    let cedar = CedarRuntime::load(&policy_dir()).unwrap();
+    let (audit, _) = temp_db();
+    let req = make_request("some-future-hook-type", json!({"tool_name": "Bash", "tool_input": {"command": "ls"}}));
+    let resp = handle_request(&cedar, &audit, &req);
+    // Should handle unknown hook types gracefully (maps to Unknown variant)
+    assert!(resp.ok);
+}

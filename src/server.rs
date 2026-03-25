@@ -75,15 +75,50 @@ pub fn handle_request(
     }
 }
 
+/// Handle a single connection: read request, process, write response.
+async fn handle_connection(
+    stream: tokio::net::UnixStream,
+    cedar: Arc<CedarRuntime>,
+    audit: Arc<AuditLog>,
+) {
+    let (mut reader, mut writer) = stream.into_split();
+
+    let frame = match ipc::read_frame_async(&mut reader).await {
+        Ok(f) => f,
+        Err(e) => {
+            error!(error = %e, "failed to read frame");
+            return;
+        }
+    };
+
+    let request: AdjudicateRequest = match serde_json::from_slice(&frame) {
+        Ok(r) => r,
+        Err(e) => {
+            let resp = AdjudicateOk::failure(format!("invalid JSON: {e}"));
+            let body = serde_json::to_vec(&resp).unwrap_or_default();
+            let _ = ipc::write_frame_async(&mut writer, &body).await;
+            return;
+        }
+    };
+
+    let response = handle_request(&request, &cedar, &audit);
+    let body = serde_json::to_vec(&response).unwrap_or_default();
+    if let Err(e) = ipc::write_frame_async(&mut writer, &body).await {
+        error!(error = %e, "failed to write response");
+    }
+}
+
 /// Run the server accept loop until the shutdown signal fires.
 ///
-/// `shutdown_rx` — when a value is received (or the sender is dropped), the loop exits.
+/// Each connection is handled in its own spawned task for concurrency.
 pub async fn run_accept_loop(
     listener: UnixListener,
     cedar: Arc<CedarRuntime>,
     audit: AuditLog,
     mut shutdown_rx: watch::Receiver<()>,
 ) {
+    let audit = Arc::new(audit);
+
     loop {
         tokio::select! {
             result = listener.accept() => {
@@ -94,31 +129,9 @@ pub async fn run_accept_loop(
                         continue;
                     }
                 };
-                let (mut reader, mut writer) = stream.into_split();
-
-                let frame = match ipc::read_frame_async(&mut reader).await {
-                    Ok(f) => f,
-                    Err(e) => {
-                        error!(error = %e, "failed to read frame");
-                        continue;
-                    }
-                };
-
-                let request: AdjudicateRequest = match serde_json::from_slice(&frame) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        let resp = AdjudicateOk::failure(format!("invalid JSON: {e}"));
-                        let body = serde_json::to_vec(&resp).unwrap_or_default();
-                        let _ = ipc::write_frame_async(&mut writer, &body).await;
-                        continue;
-                    }
-                };
-
-                let response = handle_request(&request, &cedar, &audit);
-                let body = serde_json::to_vec(&response).unwrap_or_default();
-                if let Err(e) = ipc::write_frame_async(&mut writer, &body).await {
-                    error!(error = %e, "failed to write response");
-                }
+                let cedar = Arc::clone(&cedar);
+                let audit = Arc::clone(&audit);
+                tokio::spawn(handle_connection(stream, cedar, audit));
             }
             _ = shutdown_rx.changed() => {
                 info!("Server shutting down");

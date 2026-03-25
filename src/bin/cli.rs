@@ -39,6 +39,12 @@ enum Commands {
         #[command(subcommand)]
         command: PolicyCommands,
     },
+    /// Generate Claude Code hooks configuration
+    Setup {
+        /// Print config to stdout instead of writing to settings file
+        #[arg(long)]
+        print: bool,
+    },
     /// Query the audit log
     Audit {
         /// Max events to show
@@ -218,6 +224,9 @@ fn main() -> Result<()> {
                 handle_policy_remove(&name, &socket)?;
             }
         },
+        Commands::Setup { print } => {
+            handle_setup(print)?;
+        }
         Commands::Audit {
             limit,
             decision,
@@ -401,6 +410,69 @@ fn handle_policy_remove(name: &str, socket: &std::path::Path) -> Result<()> {
             eprintln!("Note: could not reload server (file watcher will pick up the change)");
         }
     }
+
+    Ok(())
+}
+
+fn handle_setup(print_only: bool) -> Result<()> {
+    // Find the veto binary path
+    let veto_bin = std::env::current_exe().context("determine veto binary path")?;
+    let veto_bin_str = veto_bin.display().to_string();
+
+    let hooks_config = serde_json::json!({
+        "hooks": {
+            "PreToolUse": [
+                {
+                    "matcher": "*",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": format!("{veto_bin_str} hook --hook-type pre-tool-use")
+                        }
+                    ]
+                }
+            ]
+        }
+    });
+
+    if print_only {
+        println!("{}", serde_json::to_string_pretty(&hooks_config)?);
+        return Ok(());
+    }
+
+    // Determine target settings file
+    let settings_path = std::env::current_dir()
+        .context("get current directory")?
+        .join(".claude")
+        .join("settings.local.json");
+
+    // Read existing settings or start fresh
+    let mut settings: serde_json::Value = if settings_path.exists() {
+        let content = std::fs::read_to_string(&settings_path)
+            .with_context(|| format!("read {}", settings_path.display()))?;
+        serde_json::from_str(&content)
+            .with_context(|| format!("parse {}", settings_path.display()))?
+    } else {
+        serde_json::json!({})
+    };
+
+    // Merge hooks into settings
+    settings["hooks"] = hooks_config["hooks"].clone();
+
+    // Write settings
+    if let Some(parent) = settings_path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("create {}", parent.display()))?;
+    }
+    let pretty = serde_json::to_string_pretty(&settings)?;
+    std::fs::write(&settings_path, format!("{pretty}\n"))
+        .with_context(|| format!("write {}", settings_path.display()))?;
+
+    eprintln!("Wrote hooks to: {}", settings_path.display());
+    eprintln!();
+    eprintln!("Hook command: {veto_bin_str} hook --hook-type pre-tool-use");
+    eprintln!();
+    eprintln!("Make sure veto-server is running before starting Claude Code.");
 
     Ok(())
 }

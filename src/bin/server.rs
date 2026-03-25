@@ -22,6 +22,15 @@ async fn main() -> Result<()> {
 
     let config = Config::from_env();
 
+    // Validate policy directory
+    if !config.policy_dir.is_dir() {
+        anyhow::bail!(
+            "Policy directory not found: {}\n\
+             Set VETO_POLICY_DIR or run from the veto project root",
+            config.policy_dir.display()
+        );
+    }
+
     // Ensure socket directory exists
     if let Some(parent) = config.socket_path.parent() {
         std::fs::create_dir_all(parent)

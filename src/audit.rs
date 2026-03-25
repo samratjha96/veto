@@ -32,6 +32,8 @@ impl AuditLog {
         }
         let conn = Connection::open(path)
             .with_context(|| format!("open audit db {}", path.display()))?;
+        // WAL mode: allows concurrent readers while writing
+        conn.execute_batch("PRAGMA journal_mode=WAL;")?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
