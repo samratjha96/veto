@@ -102,7 +102,7 @@ rule destructive_database_admin {
 
 rule destructive_git_force {
     meta:
-        description = "Git: force-push or hard reset"
+        description = "Git: force-push, hard reset, discard changes, force-delete branches"
         severity = "high"
         category = "destructive_ops"
 
@@ -111,6 +111,10 @@ rule destructive_git_force {
         $g2 = /git\s+push\s+-f(\s|$)/ nocase
         $g3 = /git\s+reset\s+--hard/ nocase
         $g4 = /git\s+filter-branch/ nocase
+        $g5 = /git\s+checkout\s+\.(\s|$)/ nocase
+        $g6 = /git\s+restore\s+\.(\s|$)/ nocase
+        $g7 = /git\s+branch\s+-D(\s|$)/ nocase
+        $g8 = /git\s+clean\s+-[a-z]*f/ nocase
 
     condition:
         any of them
@@ -164,6 +168,49 @@ rule destructive_system_power {
         $s2 = /\bpoweroff(\s|$)/ nocase
         $s3 = /\bhalt(\s|$)/ nocase
         $s4 = /systemctl\s+(poweroff|halt)(\s|$)/ nocase
+        $s5 = /\binit\s+0(\s|$)/ nocase
+
+    condition:
+        any of them
+}
+
+rule destructive_dev_null_redirect {
+    meta:
+        description = "Redirect important files to /dev/null"
+        severity = "high"
+        category = "destructive_ops"
+
+    strings:
+        $d1 = />\s*\/dev\/null\s+2>&1/ nocase
+        $d2 = /cp\s+\/dev\/null\s+/ nocase
+        $d3 = /cat\s+\/dev\/null\s*>\s*/ nocase
+
+    condition:
+        any of them
+}
+
+rule destructive_docker_force {
+    meta:
+        description = "Docker force-remove running containers"
+        severity = "high"
+        category = "destructive_ops"
+
+    strings:
+        $d1 = /docker\s+rm\s+-f(\s|$)/ nocase
+        $d2 = /docker\s+rm\s+--force(\s|$)/ nocase
+
+    condition:
+        any of them
+}
+
+rule destructive_kubectl_delete_all {
+    meta:
+        description = "kubectl delete with --all flag"
+        severity = "high"
+        category = "destructive_ops"
+
+    strings:
+        $k1 = /kubectl\s+delete[^\n]*--all/ nocase
 
     condition:
         any of them
