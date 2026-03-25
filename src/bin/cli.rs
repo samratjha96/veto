@@ -45,6 +45,18 @@ enum Commands {
         #[arg(long)]
         print: bool,
     },
+    /// Run adjudication pipeline benchmarks
+    Bench {
+        /// Number of iterations per benchmark case
+        #[arg(long, default_value = "1000")]
+        iterations: usize,
+        /// Path to policy directory (overrides VETO_POLICY_DIR)
+        #[arg(long)]
+        policy_dir: Option<PathBuf>,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Query the audit log
     Audit {
         /// Max events to show
@@ -232,6 +244,22 @@ fn main() -> Result<()> {
         },
         Commands::Setup { print } => {
             handle_setup(print)?;
+        }
+        Commands::Bench {
+            iterations,
+            policy_dir: bench_policy_dir,
+            json: bench_json,
+        } => {
+            let dir = bench_policy_dir.unwrap_or_else(policy_dir);
+            eprintln!("Running benchmarks ({iterations} iterations, policies: {})", dir.display());
+            eprintln!();
+            let results = veto::bench::run_all(&dir, iterations)?;
+            if bench_json {
+                let json_results: Vec<_> = results.iter().map(|r| r.to_json()).collect();
+                println!("{}", serde_json::to_string_pretty(&json_results)?);
+            } else {
+                veto::bench::print_results(&results);
+            }
         }
         Commands::Audit {
             limit,

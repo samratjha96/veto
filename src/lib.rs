@@ -1,6 +1,7 @@
 pub mod adapters;
 pub mod adjudicate;
 pub mod audit;
+pub mod bench;
 pub mod cedar_runtime;
 pub mod config;
 pub mod hook;
