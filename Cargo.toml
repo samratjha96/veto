@@ -2,6 +2,8 @@
 name = "veto"
 version = "0.1.0"
 edition = "2024"
+description = "Stateless per-action policy daemon for AI coding agents"
+license = "MIT"
 
 [[bin]]
 name = "veto-server"
