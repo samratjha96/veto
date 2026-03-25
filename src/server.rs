@@ -112,16 +112,28 @@ async fn handle_connection(
         Ok(r) => r,
         Err(e) => {
             let resp = AdjudicateOk::failure(format!("invalid JSON: {e}"));
-            let body = serde_json::to_vec(&resp).unwrap_or_default();
-            let _ = ipc::write_frame_async(&mut writer, &body).await;
+            match serde_json::to_vec(&resp) {
+                Ok(body) => {
+                    let _ = ipc::write_frame_async(&mut writer, &body).await;
+                }
+                Err(ser_err) => {
+                    error!(error = %ser_err, "failed to serialize error response");
+                }
+            }
             return;
         }
     };
 
     let response = handle_request(&request, &cedar, &audit);
-    let body = serde_json::to_vec(&response).unwrap_or_default();
-    if let Err(e) = ipc::write_frame_async(&mut writer, &body).await {
-        error!(error = %e, "failed to write response");
+    match serde_json::to_vec(&response) {
+        Ok(body) => {
+            if let Err(e) = ipc::write_frame_async(&mut writer, &body).await {
+                error!(error = %e, "failed to write response");
+            }
+        }
+        Err(e) => {
+            error!(error = %e, "failed to serialize response");
+        }
     }
 }
 
