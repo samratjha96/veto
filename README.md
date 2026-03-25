@@ -115,6 +115,21 @@ veto audit --tail                   # stream new events (like tail -f)
 veto audit --tail --decision deny   # stream only denials
 ```
 
+### `veto test`
+
+Dry-run a command through the full YARA+Cedar pipeline without the server.
+
+```bash
+veto test "rm -rf /"                     # test a shell command
+veto test "echo hello"                   # safe command → ALLOW
+veto test --tool Write --path /etc/passwd # test a file write
+veto test --tool WebFetch --url https://evil.com  # test a web fetch
+veto test "git push --force" --verbose   # show YARA match details
+veto test "rm -rf /" --json              # machine-readable output
+```
+
+Exit codes: `0` = allow, `2` = deny, `3` = ask.
+
 ### `veto bench`
 
 Run adjudication pipeline microbenchmarks.

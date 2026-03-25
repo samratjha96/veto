@@ -6,7 +6,10 @@ use serde_json::json;
 use std::io::Read;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
+use veto::adjudicate;
 use veto::audit::AuditLog;
+use veto::cedar_runtime::CedarRuntime;
+use veto::hook::HookKind;
 use veto::ipc::{self, AdjudicateOk};
 
 #[derive(Parser)]
@@ -59,6 +62,29 @@ enum Commands {
     },
     /// Diagnose setup: check policies, YARA, server, hooks, audit DB
     Doctor,
+    /// Dry-run a command/action through the pipeline (no server needed)
+    Test {
+        /// Shell command to test (default action type)
+        command: Option<String>,
+        /// Tool type: Bash, Write, Edit, Read, Delete, WebFetch
+        #[arg(long, default_value = "Bash")]
+        tool: String,
+        /// File path (for Write/Edit/Read/Delete tools)
+        #[arg(long)]
+        path: Option<String>,
+        /// URL (for WebFetch tool)
+        #[arg(long)]
+        url: Option<String>,
+        /// Path to policy directory (overrides VETO_POLICY_DIR)
+        #[arg(long)]
+        policy_dir: Option<PathBuf>,
+        /// Show full YARA match details
+        #[arg(long, short)]
+        verbose: bool,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Query the audit log
     Audit {
         /// Max events to show
@@ -272,6 +298,18 @@ fn main() -> Result<()> {
             if has_fail {
                 std::process::exit(1);
             }
+        }
+        Commands::Test {
+            command,
+            tool,
+            path,
+            url,
+            policy_dir: test_policy_dir,
+            verbose,
+            json: test_json,
+        } => {
+            let dir = test_policy_dir.unwrap_or_else(policy_dir);
+            handle_test(command, &tool, path, url, &dir, verbose, test_json)?;
         }
         Commands::Audit {
             limit,
@@ -533,6 +571,141 @@ fn handle_setup(print_only: bool) -> Result<()> {
     eprintln!("Make sure veto-server is running before starting Claude Code.");
 
     Ok(())
+}
+
+fn handle_test(
+    command: Option<String>,
+    tool: &str,
+    path: Option<String>,
+    url: Option<String>,
+    policy_dir_path: &std::path::Path,
+    verbose: bool,
+    as_json: bool,
+) -> Result<()> {
+    // Build the synthetic hook payload based on tool type
+    let payload = match tool {
+        "Bash" => {
+            let cmd = command.unwrap_or_default();
+            serde_json::json!({
+                "tool_name": "Bash",
+                "tool_input": {"command": cmd}
+            })
+        }
+        "Write" | "Edit" | "Read" | "Delete" | "FileDelete" => {
+            let file_path = path
+                .or(command)
+                .context("--path or positional arg required for file tools")?;
+            serde_json::json!({
+                "tool_name": tool,
+                "tool_input": {"file_path": file_path}
+            })
+        }
+        "WebFetch" => {
+            let fetch_url = url
+                .or(command)
+                .context("--url or positional arg required for WebFetch")?;
+            serde_json::json!({
+                "tool_name": "WebFetch",
+                "tool_input": {"url": fetch_url}
+            })
+        }
+        _ => {
+            bail!("Unknown tool: {tool}. Use: Bash, Write, Edit, Read, Delete, WebFetch");
+        }
+    };
+
+    // Load Cedar runtime
+    let cedar = CedarRuntime::load(policy_dir_path)
+        .with_context(|| format!("load policies from {}", policy_dir_path.display()))?;
+
+    // Run adjudication
+    let result = adjudicate::adjudicate(&HookKind::BeforeTool, &payload, &cedar)?;
+
+    if as_json {
+        let yara_matches: Vec<serde_json::Value> = result
+            .sig
+            .matches
+            .iter()
+            .map(|m| {
+                serde_json::json!({
+                    "rule": m.identifier,
+                    "namespace": m.namespace,
+                    "metadata": m.metadata,
+                })
+            })
+            .collect();
+        let cats: Vec<&str> = result.sig.categories.iter().map(|s| s.as_str()).collect();
+        let output = serde_json::json!({
+            "verdict": result.verdict.as_str(),
+            "reason": result.verdict.reason(),
+            "scan_text": result.scan_text,
+            "yara": {
+                "severity": result.sig.severity.to_string(),
+                "match_count": result.sig.match_count(),
+                "categories": cats,
+                "matches": yara_matches,
+            },
+            "policy_count": cedar.policy_count(),
+        });
+        println!("{}", serde_json::to_string_pretty(&output)?);
+        return Ok(());
+    }
+
+    // Human-readable output
+    let verdict_icon = match &result.verdict {
+        veto::hook::Verdict::Allow => "[+] ALLOW",
+        veto::hook::Verdict::Deny { .. } => "[x] DENY",
+        veto::hook::Verdict::Ask { .. } => "[~] ASK",
+    };
+    println!("{verdict_icon}");
+
+    if let Some(reason) = result.verdict.reason() {
+        println!("    Reason: {reason}");
+    }
+
+    println!();
+    println!("  Scan text: {}", truncate(&result.scan_text, 120));
+    println!(
+        "  YARA: severity={}, matches={}, categories=[{}]",
+        result.sig.severity,
+        result.sig.match_count(),
+        result
+            .sig
+            .categories
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    println!("  Policies loaded: {}", cedar.policy_count());
+
+    if verbose && !result.sig.matches.is_empty() {
+        println!();
+        println!("  YARA matches:");
+        for m in &result.sig.matches {
+            println!("    - {} ({})", m.identifier, m.namespace);
+            for (k, v) in &m.metadata {
+                println!("      {k}: {v}");
+            }
+        }
+    }
+
+    // Exit code reflects verdict
+    match &result.verdict {
+        veto::hook::Verdict::Allow => {}
+        veto::hook::Verdict::Deny { .. } => std::process::exit(2),
+        veto::hook::Verdict::Ask { .. } => std::process::exit(3),
+    }
+
+    Ok(())
+}
+
+fn truncate(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        s.to_string()
+    } else {
+        format!("{}...", &s[..max.saturating_sub(3)])
+    }
 }
 
 fn handle_audit_tail(

@@ -4,9 +4,10 @@
 use serde_json::json;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
+use veto::adjudicate;
 use veto::audit::AuditLog;
 use veto::cedar_runtime::CedarRuntime;
-use veto::hook::Verdict;
+use veto::hook::{HookKind, Verdict};
 use veto::ipc::{AdjudicateOk, AdjudicateRequest};
 use veto::server;
 
@@ -480,4 +481,73 @@ fn unknown_hook_type_handled() {
     let resp = handle_request(&cedar, &audit, &req);
     // Should handle unknown hook types gracefully (maps to Unknown variant)
     assert!(resp.ok);
+}
+
+// ---------- veto test (dry-run adjudication) ----------
+
+#[test]
+fn test_command_safe_bash() {
+    let cedar = CedarRuntime::load(&policy_dir()).unwrap();
+    let payload = json!({
+        "tool_name": "Bash",
+        "tool_input": {"command": "ls -la"}
+    });
+    let result = adjudicate::adjudicate(&HookKind::BeforeTool, &payload, &cedar).unwrap();
+    assert_eq!(result.verdict, Verdict::Allow);
+    assert_eq!(result.scan_text, "ls -la");
+}
+
+#[test]
+fn test_command_dangerous_bash() {
+    let cedar = CedarRuntime::load(&policy_dir()).unwrap();
+    let payload = json!({
+        "tool_name": "Bash",
+        "tool_input": {"command": "rm -rf /"}
+    });
+    let result = adjudicate::adjudicate(&HookKind::BeforeTool, &payload, &cedar).unwrap();
+    assert!(matches!(result.verdict, Verdict::Deny { .. }));
+    assert_eq!(result.scan_text, "rm -rf /");
+    assert!(result.sig.severity >= veto::signature::Severity::High);
+}
+
+#[test]
+fn test_command_file_write_guarded() {
+    let cedar = CedarRuntime::load(&policy_dir()).unwrap();
+    let payload = json!({
+        "tool_name": "Write",
+        "tool_input": {"file_path": "/etc/shadow"}
+    });
+    let result = adjudicate::adjudicate(&HookKind::BeforeTool, &payload, &cedar).unwrap();
+    assert!(
+        matches!(result.verdict, Verdict::Deny { .. }),
+        "write to /etc/shadow should be denied, got {:?}",
+        result.verdict
+    );
+}
+
+#[test]
+fn test_command_webfetch_safe() {
+    let cedar = CedarRuntime::load(&policy_dir()).unwrap();
+    let payload = json!({
+        "tool_name": "WebFetch",
+        "tool_input": {"url": "https://docs.rs"}
+    });
+    let result = adjudicate::adjudicate(&HookKind::BeforeTool, &payload, &cedar).unwrap();
+    assert_eq!(result.verdict, Verdict::Allow);
+}
+
+#[test]
+fn test_command_json_output_fields() {
+    let cedar = CedarRuntime::load(&policy_dir()).unwrap();
+    let payload = json!({
+        "tool_name": "Bash",
+        "tool_input": {"command": "git push --force origin main"}
+    });
+    let result = adjudicate::adjudicate(&HookKind::BeforeTool, &payload, &cedar).unwrap();
+    // Verify all fields needed for JSON output are populated
+    assert_eq!(result.verdict.as_str(), "deny");
+    assert!(result.verdict.reason().is_some());
+    assert!(!result.scan_text.is_empty());
+    assert!(result.sig.match_count() > 0);
+    assert!(!result.sig.categories.is_empty());
 }
