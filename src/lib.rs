@@ -5,6 +5,7 @@ pub mod bench;
 pub mod cedar_runtime;
 pub mod config;
 pub mod doctor;
+pub mod explain;
 pub mod hook;
 pub mod ipc;
 pub mod llm;

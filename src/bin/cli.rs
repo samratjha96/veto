@@ -125,6 +125,16 @@ enum PolicyCommands {
         /// Policy filename (with or without .cedar extension)
         name: String,
     },
+    /// Explain a policy by @id (show description, Cedar text, file)
+    Explain {
+        /// Policy @id to look up
+        id: String,
+    },
+    /// Search policies by keyword (matches id, description, Cedar text)
+    Search {
+        /// Keyword to search for
+        query: String,
+    },
     /// Browse and apply curated policy templates
     Template {
         #[command(subcommand)]
@@ -293,6 +303,12 @@ fn main() -> Result<()> {
             }
             PolicyCommands::Remove { name } => {
                 handle_policy_remove(&name, &socket)?;
+            }
+            PolicyCommands::Explain { id } => {
+                handle_policy_explain(&id)?;
+            }
+            PolicyCommands::Search { query } => {
+                handle_policy_search(&query)?;
             }
             PolicyCommands::Template { command: tmpl_cmd } => match tmpl_cmd {
                 TemplateCommands::List { category } => {
@@ -543,6 +559,59 @@ fn handle_policy_remove(name: &str, socket: &std::path::Path) -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+fn handle_policy_explain(id: &str) -> Result<()> {
+    let dir = policy_dir();
+    match veto::explain::find_policy(&dir, id)? {
+        Some(p) => {
+            println!("Policy: {}", p.id);
+            if let Some(desc) = &p.description {
+                println!("  Description: {desc}");
+            }
+            println!("  Effect: {}", p.effect);
+            if !p.actions.is_empty() {
+                println!("  Actions: {}", p.actions.join(", "));
+            }
+            println!("  File: {}", p.filename);
+            println!();
+            println!("{}", p.cedar_text);
+        }
+        None => {
+            // Try fuzzy: search for the id as a keyword
+            let matches = veto::explain::search(&dir, id)?;
+            if matches.is_empty() {
+                bail!("No policy found with @id \"{id}\"");
+            } else {
+                eprintln!("No exact match for \"{id}\". Did you mean:");
+                for m in &matches {
+                    let desc = m.description.as_deref().unwrap_or("");
+                    eprintln!("  {:<40} {}", m.id, desc);
+                }
+                std::process::exit(1);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn handle_policy_search(query: &str) -> Result<()> {
+    let dir = policy_dir();
+    let results = veto::explain::search(&dir, query)?;
+
+    if results.is_empty() {
+        println!("No policies matching \"{query}\".");
+        return Ok(());
+    }
+
+    println!("Found {} matching policies:\n", results.len());
+    for p in &results {
+        let desc = p.description.as_deref().unwrap_or("");
+        println!("  {:<40} [{}] {}", p.id, p.effect, desc);
+        println!("    File: {}  Actions: {}", p.filename, p.actions.join(", "));
+        println!();
+    }
     Ok(())
 }
 
