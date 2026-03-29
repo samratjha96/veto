@@ -40,8 +40,10 @@ EOF
 
     claude -p "$(cat $PROMPTFILE)" \
         --model "$MODEL" \
-        --allowedTools "Bash(*)" "Read(*)" "Write(*)" "Edit(*)" "Glob(*)" "Grep(*)" \
+        --permission-mode auto \
         --max-turns 50 \
+        --verbose \
+        --output-format stream-json \
         2>&1 | tee "$LOGFILE"
 
     rm -f "$PROMPTFILE"

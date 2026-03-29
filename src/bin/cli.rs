@@ -616,28 +616,13 @@ fn handle_policy_search(query: &str) -> Result<()> {
 }
 
 fn handle_setup(print_only: bool) -> Result<()> {
-    // Find the veto binary path
     let veto_bin = std::env::current_exe().context("determine veto binary path")?;
     let veto_bin_str = veto_bin.display().to_string();
 
-    let hooks_config = serde_json::json!({
-        "hooks": {
-            "PreToolUse": [
-                {
-                    "matcher": "*",
-                    "hooks": [
-                        {
-                            "type": "command",
-                            "command": format!("{veto_bin_str} hook --hook-type pre-tool-use")
-                        }
-                    ]
-                }
-            ]
-        }
-    });
-
     if print_only {
-        println!("{}", serde_json::to_string_pretty(&hooks_config)?);
+        let mut preview = serde_json::json!({});
+        veto::setup::merge_hooks(&mut preview, &veto_bin_str);
+        println!("{}", serde_json::to_string_pretty(&preview)?);
         return Ok(());
     }
 
@@ -657,8 +642,8 @@ fn handle_setup(print_only: bool) -> Result<()> {
         serde_json::json!({})
     };
 
-    // Merge hooks into settings
-    settings["hooks"] = hooks_config["hooks"].clone();
+    // Merge veto hooks without clobbering existing hooks
+    veto::setup::merge_hooks(&mut settings, &veto_bin_str);
 
     // Write settings
     if let Some(parent) = settings_path.parent() {
@@ -671,7 +656,9 @@ fn handle_setup(print_only: bool) -> Result<()> {
 
     eprintln!("Wrote hooks to: {}", settings_path.display());
     eprintln!();
-    eprintln!("Hook command: {veto_bin_str} hook --hook-type pre-tool-use");
+    eprintln!("Hooks registered:");
+    eprintln!("  PreToolUse:       {veto_bin_str} hook --hook-type pre-tool-use");
+    eprintln!("  PermissionRequest: {veto_bin_str} hook --hook-type permission-request");
     eprintln!();
     eprintln!("Make sure veto-server is running before starting Claude Code.");
 
