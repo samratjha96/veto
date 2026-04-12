@@ -2,7 +2,7 @@
 
 # Veto
 
-**Policy enforcement, audit, and governance for powerful coding agents.** Draft rules in **natural language**, publish them from a **central policy store**, and have the **same guardrails enforced on every developer machine**—with a full audit trail, on infrastructure you control.
+**Shared safety rails for coding agents** (for example **Claude Code**, **Codex**, **OpenCode**, **Pi**, and similar tools that run shell and tools on your behalf). Agents are most useful when they can run commands, edit files, and use the network—but you should not ask every developer to maintain their own blocklists and “don’t do this” notes. Veto lets a team or company define **one set of rules**, distribute them from a **single place** (usually a repo or package you already use), and have each developer run a **small local service plus editor hooks** so the same protections apply everywhere—with an audit log when something is blocked or questioned.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust Edition](https://img.shields.io/badge/edition-2024-orange.svg)](https://doc.rust-lang.org/edition-guide/rust-2024/index.html)
@@ -27,30 +27,30 @@ cargo install --path .
 
 ## TL;DR
 
-**The problem:** Powerful coding agents can run shell, rewrite files, and fetch URLs with little friction. Without shared governance, every machine is a snowflake—and one bad tool call can become an incident.
+**The problem:** Coding agents work best with broad permission to run shell, edit files, and fetch URLs. If each person maintains their own “forbidden command” list, coverage is uneven and risky behavior slips through.
 
-**The solution:** Veto gives you **one policy regime for your whole org**: maintain Cedar policies in a **single source of truth** (for example a Git repo or package your platform team owns), **optionally draft new rules from natural language** (`veto policy add`), distribute that tree to each workstation, and run a **small local daemon** that enforces the same decisions everywhere. Every verdict is auditable. Typical adjudication stays **sub-millisecond** on commodity laptops (see [Performance](#performance)).
+**The solution:** Maintain **org- or team-wide rules** in one place (for example a Git repo). Each developer runs **`veto-server`** pointed at that policy folder and wires **hooks** from their agent—**Claude Code**, **Codex**, **OpenCode**, **Pi**, or anything else that can send the same **pre-tool hook JSON** to **`veto hook`**—so every tool call is checked locally before it runs. (**`veto setup`** is the turnkey path for **Claude Code**; other agents follow their docs to call **`veto hook`** the same way.) You change the rules **once**; after updated policy files land on a machine—via `git pull`, your config management, or packages—the daemon **picks them up automatically**. Developers do **not** need to restart the daemon or run a separate “apply policy” step for Cedar edits. Decisions are fast (**sub-millisecond** typical; see [Performance](#performance)) and **logged** for review.
 
-### Central governance, local enforcement
+### Who maintains what
 
-| What you centralize | What runs on each dev machine |
-|---------------------|-------------------------------|
-| The `policies/` tree (and who may change it) | `veto-server` reading `VETO_POLICY_DIR`, hot-reloading on updates |
-| How new rules are proposed (NL draft → review → merge) | Hooks so the agent cannot bypass the daemon |
+| One place (you choose how to host it) | On each developer laptop |
+|---------------------------------------|----------------------------|
+| The shared **`policies/`** folder (who may edit it is up to you) | **`veto-server`** watches that folder and reloads when files change |
+| Optional: draft new rules in chat (`veto policy add`), then merge reviewed text into the shared folder | **Hooks** so the agent talks to Veto instead of skipping checks |
 
-Veto does not replace your delivery mechanism: use **Git**, configuration management, or internal packages to sync the policy directory to developers. The daemon only cares that the directory is present and up to date.
+Veto does not replace how you ship files: use **Git**, MDM, or internal packages so the policy directory stays current. The daemon only needs the folder on disk and read access.
 
-### Why Veto?
+### What you get
 
-| Capability | What you get |
-|------------|----------------|
-| **Default guardrails** | **44** Cedar policies (destructive shell, file guards, severity gates) plus **72** YARA rules across 7 categories |
-| **Speed** | YARA + Cedar + verdict in **~0.3–0.4 ms** median; **&lt; ~0.5 ms** p99 (release build; see [Performance](#performance)) |
-| **Hot reload** | Edit `policies/*.cedar`; the daemon reloads without restart (file watcher + manual `veto reload`) |
-| **User prompts** | Cedar forbid policies whose `@id` contains `ask` become **Ask** (confirm) instead of silent **Deny**; medium+ YARA hits can **Ask** even when Cedar permits |
-| **Process context** | Optional enrichment for `kill`/`pkill`/`killall` (long-running processes) for tighter policies |
-| **Audit** | `veto audit` / `--tail` over `~/.veto/audit.db` |
-| **Natural language policies** | `veto policy add "..."` drafts Cedar for review; commit the result to your **central** policy repo so every machine inherits it after sync |
+| Topic | What it means |
+|-------|----------------|
+| **Batteries included** | **44** Cedar policies and **72** YARA rules (destructive commands, sensitive paths, risky URLs, secrets-shaped strings, and more) |
+| **Fast** | Full check in about **~0.3–0.4 ms** median on a typical laptop (see [Performance](#performance)) |
+| **Live policy updates** | Change `*.cedar` on disk; the server reloads (**no restart**). You can also run `veto reload`. |
+| **Block vs “are you sure?”** | Rules can **deny** outright or **ask** for confirmation. Some risky patterns trigger **ask** even when your Cedar rules would allow the action—so you get a second look when it matters. |
+| **Kill commands** | Optional extra context for `kill` / `pkill` / `killall` so policies can reason about targets. |
+| **Audit trail** | `veto audit` over `~/.veto/audit.db` |
+| **Draft from English** | `veto policy add "…"` proposes Cedar for humans to review; ship the result in the shared policy repo |
 
 ---
 
@@ -67,9 +67,9 @@ veto ping && veto status
 # Dry-run without the server (same pipeline)
 veto test "rm -rf /"                    # exit 2 = deny
 veto test "echo hello"                  # exit 0 = allow
-veto test --tool WebFetch --url 'https://pastebin.com/upload'   # often exit 3 = ask (YARA)
+veto test --tool WebFetch --url 'https://pastebin.com/upload'   # often exit 3 = ask (built-in patterns)
 
-# Hook-shaped JSON (what Claude Code sends)
+# Hook-shaped JSON (what Claude Code and compatible agents send)
 echo '{"tool_name":"Bash","tool_input":{"command":"ls -la"}}' \
   | veto hook --hook-type pre-tool-use
 
@@ -82,11 +82,11 @@ veto audit --decision deny --json
 
 ## Design philosophy
 
-1. **Stateless per action** — No session store: each hook builds fresh Cedar entities from the payload, YARA signature, and optional process snapshot. Easier to reason about than multi-turn taint tracking.
-2. **Defense in depth** — YARA catches broad classes of misuse; Cedar encodes *your* org rules. Medium-or-higher YARA severity escalates to **Ask** even when no Cedar rule fires.
-3. **Local first** — Unix domain socket, SQLite audit log, policies on disk. No cloud dependency for adjudication (LLM is optional and only for `veto policy add`).
-4. **Agent-native I/O** — Responses match Claude Code hook JSON (`permissionDecision`, reasons) so the agent stops or prompts without custom clients.
-5. **Explicit policy IDs** — Cedar `@id` values surface as deny/ask reasons and in the audit log—no opaque scores.
+1. **One decision at a time** — Each tool call is judged from the request, a quick pattern scan, optional process info, and your policies—no hidden session state to debug.
+2. **Two layers** — Broad pattern checks catch a wide range of bad ideas; your Cedar policies say what *your* org allows or forbids. Serious pattern hits can still surface a **confirm** prompt even when Cedar would allow the action.
+3. **Local by default** — Socket to a small daemon, SQLite audit log, policies as files. No vendor cloud required to allow or deny a run (an LLM is only used if you use `veto policy add`).
+4. **Works with common coding agents** — Replies use the hook JSON those tools expect (`allow` / `deny` / `ask` plus reasons). **Claude Code**, **Codex**, **OpenCode**, **Pi**, and others can integrate as long as they can invoke **`veto hook`** with the same payload shape.
+5. **Named rules** — When something is blocked or questioned, you see **which policy** fired—not a mystery score.
 
 ---
 
@@ -94,15 +94,15 @@ veto audit --decision deny --json
 
 | | Veto | Shell aliases / one-off wrappers | Enterprise DLP only | “Trust the model” |
 |--|------|-----------------------------------|---------------------|-------------------|
-| Declarative policies (Cedar) | Yes | Rarely | Sometimes | No |
-| Fast pre-scan (YARA) | Yes | Ad hoc | Varies | No |
+| Versioned org rules (Cedar files) | Yes | Rarely | Sometimes | No |
+| Fast built-in pattern pack | Yes | Ad hoc | Varies | No |
 | Sub-ms local decision | Yes | Varies | Often network-bound | N/A |
-| First-class Claude Code hooks | Yes | DIY | DIY | N/A |
+| Hooks for Claude Code, Codex, OpenCode, Pi, … (same JSON) | Yes | DIY | DIY | N/A |
 | Open source, self-hosted | Yes | N/A | Often proprietary | N/A |
 
-**Good fit:** you use Claude Code (or can emit the same hook JSON), you want **allow/deny/ask** with **auditability**, and you’re OK running a small local daemon.
+**Good fit:** you use **Claude Code**, **Codex**, **OpenCode**, **Pi**, or another agent that can call **`veto hook`** with the same JSON; you want **allow/deny/ask** with **auditability**; and you’re OK running a small local daemon.
 
-**Poor fit:** you need Windows-native support today (Unix socket + Claude hooks are the happy path), or you want a hosted SaaS with zero local processes.
+**Poor fit:** you need Windows-native support today (Unix socket + hook wiring are the happy path), or you want a hosted SaaS with zero local processes.
 
 ---
 
@@ -130,7 +130,7 @@ cargo install --path .   # copies into ~/.cargo/bin
 
 - **Rust** toolchain (2024 edition)
 - **macOS or Linux** for the Unix socket workflow (primary target)
-- **Claude Code** (or compatible hook JSON) if you use `veto setup` / `veto hook`
+- A **coding agent** that can run **`veto hook`** (**Claude Code**, **Codex**, **OpenCode**, **Pi**, …). Use **`veto setup`** for Claude Code; other products need hook config per their documentation.
 
 ---
 
@@ -154,7 +154,7 @@ cargo install --path .   # copies into ~/.cargo/bin
    veto status  # JSON with policy_count, event_count
    ```
 
-5. **Wire Claude Code** (from the project where you want hooks)
+5. **Wire your agent** (from the project where you want hooks)—for **Claude Code**, use **`veto setup`**; for **Codex**, **OpenCode**, **Pi**, or others, configure the equivalent pre-tool hook to call **`veto hook`**
 
    ```bash
    cd /path/to/your/project
@@ -173,7 +173,7 @@ cargo install --path .   # copies into ~/.cargo/bin
 
 ```
 +------------------------------------------------------------------+
-|  Claude Code (PreToolUse / PermissionRequest)                    |
+|  Coding agent (e.g. Claude Code, Codex, OpenCode, Pi)            |
 |  JSON on stdin -> veto hook --hook-type pre-tool-use             |
 +------------------------------------------------------------------+
                                |
@@ -189,7 +189,7 @@ cargo install --path .   # copies into ~/.cargo/bin
                                |
                                v
 +------------------------------------------------------------------+
-|  2. YARA-X: embedded rules -> SignatureContext                   |
+|  2. Pattern scan (YARA) -> summary for policies                  |
 |     (severity, categories, matches)                              |
 +------------------------------------------------------------------+
                                |
@@ -200,7 +200,7 @@ cargo install --path .   # copies into ~/.cargo/bin
                                |
                                v
 +------------------------------------------------------------------+
-|  4. Cedar: PolicySet + schema -> Allow / Forbid (+ policy @id)   |
+|  4. Cedar policies -> allow / forbid / confirm (+ rule names)    |
 +------------------------------------------------------------------+
                                |
            +-------------------+-------------------+
@@ -336,13 +336,15 @@ export RUST_LOG="info"
 
 ---
 
-## Policies and YARA (summary)
+## How rules work
 
-- **Cedar:** `policies/*.cedar` with `@id("...")` annotations; actions include `ShellCommand`, `WebFetch`, `FileRead` / `FileWrite` / `FileEdit` / `FileDelete`. Context includes YARA `signature.*` and optional process fields for kill-like commands.
-- **“Ask” policies:** if every firing forbid policy’s `@id` contains the substring `ask`, the verdict is **Ask** instead of **Deny** (Cedar has no built-in third effect).
-- **YARA:** rules under `rules/*.yar` are **compiled into the binary**; changing rules requires a **rebuild**. Policies can still be edited live on disk.
+**Team policies (Cedar)** live as `*.cedar` files under your shared `policies/` folder. They describe what is allowed or not for shell commands, file access, fetches, and similar actions. You can reference the built-in pattern scan (severity and categories) inside those rules, and optionally use extra process details when the command looks like `kill` / `pkill` / `killall`.
 
-Included policy files (representative): `base.cedar`, `destructive.cedar`, `file_guards.cedar`, `ask_before_kill.cedar`.
+**Built-in pattern pack (YARA)** ships inside the `veto` binary. It catches many “obviously risky” shapes (secrets-looking strings, exfil idioms, destructive commands, and more). Updating those patterns means **rebuilding or upgrading the binary**; updating Cedar files on disk does **not** require that.
+
+**Confirm vs deny:** Your Cedar rules can end in a hard **deny** or in a **confirm** (ask the user) depending on how the rule is written. If several deny-style rules fire at once, they only become a single **confirm** when *all* of them are the “ask first” kind—otherwise the outcome is **deny**. (This avoids half your rules saying “stop” and one rule quietly turning it into a prompt.)
+
+Shipped examples you can start from: `base.cedar`, `destructive.cedar`, `file_guards.cedar`, `ask_before_kill.cedar`.
 
 ---
 
@@ -388,7 +390,7 @@ veto doctor
 ## Limitations
 
 - **Platform:** Unix socket workflow is aimed at **macOS/Linux**. Windows is not a first-class target.
-- **Agent integration:** Hook JSON and `veto setup` target **Claude Code** conventions; other agents need their own adapter or manual hook wiring.
+- **Agent integration:** **`veto setup`** targets **Claude Code**. **Codex**, **OpenCode**, **Pi**, and other agents need hook configuration that forwards the same JSON to **`veto hook`** (per product docs).
 - **YARA updates:** rule changes require **recompiling** the crate (rules are `include_dir!` embedded).
 - **Threat model:** Veto guards the **agent’s tool path**, not a compromised host kernel, malicious binaries already on disk, or users who bypass hooks.
 - **NL policies:** `veto policy add` quality depends on the LLM and your prompts; always review generated Cedar before trusting it in production.
@@ -400,11 +402,13 @@ veto doctor
 
 ### How do the same policies end up on every developer machine?
 
-You keep **one canonical `policies/` tree** (typically in Git or an internal artifact). Sync it to each workstation—`git pull`, configuration management, MDM, or a package your platform team publishes—then point `VETO_POLICY_DIR` at that path and run `veto-server`. Updates **hot-reload** when files change. Use **`veto policy add`** on a maintainer machine to draft text; **merge reviewed Cedar** into the central tree so the next sync rolls the rule out everywhere.
+Put the **`policies/`** folder in **one shared place**—usually a Git repo or an internal package your team already distributes. Each laptop points `VETO_POLICY_DIR` at that folder and runs **`veto-server`**. When the files change on disk (after `git pull`, a package update, or sync from IT), the server **reloads automatically**; people do not restart the daemon for routine Cedar edits.
 
-### Why Cedar and YARA together?
+To propose new rules in plain language, use **`veto policy add`** on a maintainer machine, **review** the generated Cedar, then **merge** into the shared folder so the next update reaches everyone.
 
-YARA is a fast, pattern-first signal (secrets, exfil patterns, destructive idioms). Cedar is a small, analyzable policy language for explicit permits and forbids with structured context—including YARA severity and categories.
+### Why two kinds of rules (patterns + policies)?
+
+The **pattern pack** is a fast, wide net for common bad ideas (secrets-shaped text, risky URLs, destructive shell, and similar). **Cedar** is where you write **your** org’s allow/deny/confirm logic, and you can use the pattern results inside those policies. Together you get broad coverage plus rules you can read and version like normal code.
 
 ### Does Veto replace secrets scanners or EDR?
 
@@ -414,9 +418,9 @@ No. It’s a **focused control** for **agent-issued** commands and tool I/O, wit
 
 Yes. Any **OpenAI-compatible** chat completions server works: set `LLM_GATEWAY_BASE_URL` to its `/v1` base and pick a matching `VETO_MODEL`.
 
-### What if multiple Cedar policies forbid an action?
+### What if several policies disagree?
 
-Diagnostics aggregate policy ids; **Ask** only applies when **every** matched id contains `ask`—otherwise you get **Deny**.
+You always see **which rules** fired. **Confirm** only wins when **every** firing “stop” rule is the kind meant to **ask first**; if any rule is a plain **deny**, the result is **deny**.
 
 ### How do I test policies in CI?
 
