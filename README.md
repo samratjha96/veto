@@ -7,6 +7,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust Edition](https://img.shields.io/badge/edition-2024-orange.svg)](https://doc.rust-lang.org/edition-guide/rust-2024/index.html)
 
+</div>
+
 ### Quick install
 
 ```bash
@@ -20,8 +22,6 @@ git clone https://github.com/samratjha96/veto.git
 cd veto
 cargo install --path .
 ```
-
-</div>
 
 ---
 
@@ -173,9 +173,9 @@ cargo install --path .   # copies into ~/.cargo/bin
 
 ```
 +------------------------------------------------------------------+
-|  Claude Code (PreToolUse / PermissionRequest)                     |
-|  JSON on stdin -> veto hook --hook-type pre-tool-use              |
-+------------------------------+------------------------------------+
+|  Claude Code (PreToolUse / PermissionRequest)                    |
+|  JSON on stdin -> veto hook --hook-type pre-tool-use             |
++------------------------------------------------------------------+
                                |
                                v
 +------------------------------------------------------------------+
@@ -184,42 +184,43 @@ cargo install --path .   # copies into ~/.cargo/bin
                                |
                                v
 +------------------------------------------------------------------+
-|  1. Adapter: hook JSON -> scan text (command, path, URL, ...) |
+|  1. Adapter: hook JSON -> scan text (command, path, URL, ...)    |
 +------------------------------------------------------------------+
                                |
                                v
 +------------------------------------------------------------------+
-|  2. YARA-X: embedded rules/ -> SignatureContext                 |
-|     (severity, categories, matches)                             |
+|  2. YARA-X: embedded rules -> SignatureContext                   |
+|     (severity, categories, matches)                              |
 +------------------------------------------------------------------+
                                |
                                v
 +------------------------------------------------------------------+
-|  3. Optional: process context for kill-like commands            |
+|  3. Optional: process context for kill-like commands             |
 +------------------------------------------------------------------+
                                |
                                v
 +------------------------------------------------------------------+
-|  4. Cedar: PolicySet + schema -> Allow / Forbid (+ policy @id) |
+|  4. Cedar: PolicySet + schema -> Allow / Forbid (+ policy @id)   |
 +------------------------------------------------------------------+
                                |
-              +----------------+----------------+
-              v                v                v
-+-------------+ +-------------+      +-------------+
-| Allow       |      | Deny        |      | Ask         |
-| (continue)  |      | + reasons   |      | (prompt)    |
-+-------------+      +-------------+      +-------------+
-              \ |              /
-               +-------------+-------------+
-                             |
-                             v
+           +-------------------+-------------------+
+           |                   |                   |
+           v                   v                   v
+    +-------------+     +-------------+     +-------------+
+    | Allow       |     | Deny        |     | Ask         |
+    | (continue)  |     | + reasons   |     | (prompt)    |
+    +-------------+     +-------------+     +-------------+
+           |                   |                   |
+           +-------------------+-------------------+
+                               |
+                               v
 +------------------------------------------------------------------+
-|  SQLite audit log (VETO_DB, default ~/.veto/audit.db)             |
+|  SQLite audit log (VETO_DB, default ~/.veto/audit.db)            |
 +------------------------------------------------------------------+
-                             |
-                             v
+                               |
+                               v
 +------------------------------------------------------------------+
-|  Hook JSON response (permissionDecision allow/deny/ask + reason)  |
+|  Hook JSON response (permissionDecision allow/deny/ask + reason) |
 +------------------------------------------------------------------+
 ```
 
