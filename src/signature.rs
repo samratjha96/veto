@@ -400,6 +400,7 @@ mod tests {
 
     #[test]
     fn detects_stripe_secret_key() {
+        // rk_* restricted keys match the same YARA rule; avoid common publishable key prefixes in source.
         let ctx = scan("STRIPE_KEY=rk_test_0123456789012345678901234");
         assert!(ctx
             .matches
@@ -417,7 +418,8 @@ mod tests {
     }
 
     #[test]
-    fn detects_slack_webhook() {
+    fn detects_slack_bot_token() {
+        // Bot token matches secrets_slack_tokens; avoid pasteable incoming-webhook URLs in source.
         let ctx = scan(concat!("xo", "xb", "-1234567890-1234567890-abcdefghijklmnopqrstuvwx"));
         assert!(ctx
             .matches
