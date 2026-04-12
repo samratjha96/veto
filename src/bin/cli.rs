@@ -389,12 +389,13 @@ fn main() -> Result<()> {
 }
 
 async fn handle_policy_add(description: &str, socket: &std::path::Path, dry_run: bool) -> Result<()> {
-    let api_key = std::env::var("API_KEY")
-        .context("API_KEY env var required for policy generation")?;
+    let api_key =
+        std::env::var("API_KEY").context("API_KEY env var required for policy generation")?;
+    let gateway = veto::config::llm_gateway_base_url();
     let model = std::env::var("VETO_MODEL")
-        .unwrap_or_else(|_| "openai/openai/gpt-5.4-mini".to_string());
+        .unwrap_or_else(|_| "gpt-4o-mini".to_string());
 
-    let llm = veto::llm::LlmClient::new(&api_key, &model);
+    let llm = veto::llm::LlmClient::new(&gateway, &api_key, &model);
     let dir = policy_dir();
 
     eprintln!("Generating Cedar policy from: \"{description}\"");

@@ -41,7 +41,7 @@ pub fn run_all(
     checks.push(check_audit_db(db_path));
     checks.push(check_server(socket_path));
     checks.push(check_hooks());
-    checks.push(check_llm_api_key_env());
+    checks.push(check_llm_api_key());
     checks
 }
 
@@ -341,19 +341,20 @@ fn has_veto_hook(path: &Path) -> bool {
     content.contains("veto")
 }
 
-fn check_llm_api_key_env() -> Check {
+fn check_llm_api_key() -> Check {
     match std::env::var("API_KEY") {
         Ok(key) if !key.is_empty() => {
+            let gateway = crate::config::llm_gateway_base_url();
             let model = std::env::var("VETO_MODEL")
-                .unwrap_or_else(|_| "openai/openai/gpt-5.4-mini".to_string());
+                .unwrap_or_else(|_| "gpt-4o-mini".to_string());
             Check {
-                name: "llm api key",
+                name: "llm (policy add)",
                 status: CheckStatus::Pass,
-                detail: format!("set (model: {model})"),
+                detail: format!("API_KEY set (gateway: {gateway}, model: {model})"),
             }
         }
         _ => Check {
-            name: "llm api key",
+            name: "llm (policy add)",
             status: CheckStatus::Warn,
             detail: "API_KEY not set (NL->Cedar generation unavailable)".to_string(),
         },
@@ -434,11 +435,9 @@ mod tests {
     }
 
     #[test]
-    fn llm_key_not_set_warns() {
-        // This test relies on the env var not being set in test environment,
-        // which is the typical case. If API_KEY is set, this test still
-        // passes (just checks a different branch).
-        let check = check_llm_api_key_env();
+    fn llm_api_key_not_set_warns() {
+        // Typical case: API_KEY unset in tests → warn. If set in env, may pass.
+        let check = check_llm_api_key();
         assert!(
             check.status == CheckStatus::Pass || check.status == CheckStatus::Warn,
             "should be pass or warn depending on env"

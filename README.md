@@ -304,8 +304,9 @@ Embedded at compile time from `rules/`. Seven categories:
 | `VETO_POLICY_DIR` | `./policies` | Cedar policies and schema directory |
 | `VETO_SOCKET` | `~/.veto/veto.sock` | Unix socket path |
 | `VETO_DB` | `~/.veto/audit.db` | SQLite audit log path |
-| `API_KEY` | -- | Required for `veto policy add` (NL -> Cedar) |
-| `VETO_MODEL` | `openai/openai/gpt-5.4-mini` | LLM model for policy generation |
+| `API_KEY` | -- | Required for `veto policy add` (NL → Cedar); bearer token for the LLM gateway |
+| `LLM_GATEWAY_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible API root (chat completions) |
+| `VETO_MODEL` | `gpt-4o-mini` | Model id for policy generation (must match your gateway) |
 | `RUST_LOG` | `info` | Tracing filter |
 
 ## Performance
@@ -341,10 +342,12 @@ VETO_POLICY_DIR=/path/to/policies veto-server
 
 ### "API_KEY env var required"
 
-Only needed for `veto policy add`. Set it:
+Only needed for `veto policy add`. Set your provider key and, if needed, the gateway URL:
 
 ```bash
-export API_KEY=nvapi-...
+export API_KEY=sk-...
+export LLM_GATEWAY_BASE_URL=https://api.openai.com/v1
+export VETO_MODEL=gpt-4o-mini
 ```
 
 ### Diagnose Everything at Once
@@ -357,7 +360,7 @@ veto doctor
 # [+] audit database            /Users/you/.veto/audit.db (42 events)
 # [+] veto-server               running (43 policies)
 # [+] claude hooks              configured in .claude/settings.local.json
-# [~] llm api key            not set (policy add unavailable)
+# [~] llm (policy add)         API_KEY not set (policy add unavailable)
 ```
 
 ## Testing

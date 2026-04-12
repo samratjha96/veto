@@ -3,8 +3,6 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
-
 pub struct LlmClient {
     http: reqwest::Client,
     url: String,
@@ -42,11 +40,13 @@ struct ChoiceMessage {
 }
 
 impl LlmClient {
-    pub fn new(api_key: &str, model: &str) -> Self {
+    /// `gateway_base_url` is the OpenAI-compatible API root (e.g. `https://api.openai.com/v1`).
+    pub fn new(gateway_base_url: &str, api_key: &str, model: &str) -> Self {
         let key = normalize_api_key(api_key);
+        let base = gateway_base_url.trim().trim_end_matches('/');
         Self {
             http: reqwest::Client::new(),
-            url: format!("{DEFAULT_BASE_URL}/chat/completions"),
+            url: format!("{base}/chat/completions"),
             model: model.to_string(),
             api_key: key,
         }
