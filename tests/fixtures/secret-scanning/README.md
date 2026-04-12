@@ -1,0 +1,1 @@
+These files hold **intentionally fake** strings that match YARA secret-detection rules in unit tests. They are listed in `.github/secret_scanning.yml` so GitHub secret scanning push protection does not block the repository. Do not put real credentials here.

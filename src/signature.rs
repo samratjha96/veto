@@ -400,8 +400,9 @@ mod tests {
 
     #[test]
     fn detects_stripe_secret_key() {
-        // rk_* restricted keys match the same YARA rule; avoid common publishable key prefixes in source.
-        let ctx = scan("STRIPE_KEY=rk_test_0123456789012345678901234");
+        // Fixture path is ignored by .github/secret_scanning.yml (synthetic rk_* test vector).
+        let sample = include_str!("../tests/fixtures/secret-scanning/stripe-restricted-key.txt").trim();
+        let ctx = scan(sample);
         assert!(ctx
             .matches
             .iter()
@@ -419,7 +420,6 @@ mod tests {
 
     #[test]
     fn detects_slack_bot_token() {
-        // Bot token matches secrets_slack_tokens; avoid pasteable incoming-webhook URLs in source.
         let ctx = scan(concat!("xo", "xb", "-1234567890-1234567890-abcdefghijklmnopqrstuvwx"));
         assert!(ctx
             .matches
