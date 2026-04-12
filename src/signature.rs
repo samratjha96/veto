@@ -165,6 +165,17 @@ impl From<&Match> for MatchSummary {
 mod tests {
     use super::*;
 
+    fn utf8_payload_from_decimal_fixture(raw: &str) -> String {
+        let bytes: Vec<u8> = raw
+            .lines()
+            .map(|l| l.split('#').next().unwrap_or("").trim())
+            .filter(|l| !l.is_empty())
+            .flat_map(|l| l.split(','))
+            .filter_map(|s| s.trim().parse::<u8>().ok())
+            .collect();
+        String::from_utf8(bytes).expect("fixture decodes to valid utf-8")
+    }
+
     #[test]
     fn detects_recursive_rm() {
         for sample in [
@@ -420,7 +431,9 @@ mod tests {
 
     #[test]
     fn detects_slack_bot_token() {
-        let ctx = scan(concat!("xo", "xb", "-1234567890-1234567890-abcdefghijklmnopqrstuvwx"));
+        let raw = include_str!("../tests/fixtures/secret-scanning/slack-bot-token.utf8.decimals");
+        let sample = utf8_payload_from_decimal_fixture(raw);
+        let ctx = scan(&sample);
         assert!(ctx
             .matches
             .iter()
