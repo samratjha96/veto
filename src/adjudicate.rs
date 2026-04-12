@@ -46,13 +46,21 @@ pub fn adjudicate(
     )?;
 
     // 5. Build verdict.
+    //
+    // Cedar only has permit/forbid — no "ask" effect. We use a naming convention:
+    // if every firing policy ID contains "ask", the deny becomes an Ask verdict
+    // (prompts the user) instead of a hard Deny (blocks silently).
     let verdict = if !cedar_decision.allowed {
         let reasons = if cedar_decision.deny_reasons.is_empty() {
             "Policy denied this action".to_string()
         } else {
             cedar_decision.deny_reasons.join(", ")
         };
-        Verdict::Deny { reason: reasons }
+        if should_ask(&cedar_decision.deny_reasons) {
+            Verdict::Ask { reason: reasons }
+        } else {
+            Verdict::Deny { reason: reasons }
+        }
     } else if sig.severity >= Severity::Medium {
         Verdict::Ask {
             reason: format_yara_warning(&sig),
@@ -66,6 +74,13 @@ pub fn adjudicate(
         sig,
         scan_text,
     })
+}
+
+/// If every firing Cedar policy has "ask" in its @id, treat as Ask instead of Deny.
+/// This lets policy authors write `@id("ask-before-kill")` to prompt the user
+/// rather than hard-blocking.
+fn should_ask(deny_reasons: &[String]) -> bool {
+    !deny_reasons.is_empty() && deny_reasons.iter().all(|id| id.contains("ask"))
 }
 
 fn is_kill_command(text: &str) -> bool {
@@ -156,6 +171,25 @@ mod tests {
         assert!(is_kill_command("pkill nginx"));
         assert!(is_kill_command("killall python"));
         assert!(!is_kill_command("echo killed it"));
+    }
+
+    // --- should_ask naming convention tests ---
+
+    #[test]
+    fn should_ask_when_all_policies_contain_ask() {
+        assert!(should_ask(&["ask-before-kill".into()]));
+        assert!(should_ask(&["ask-before-kill".into(), "ask-before-rm".into()]));
+    }
+
+    #[test]
+    fn should_not_ask_when_any_policy_is_hard_deny() {
+        assert!(!should_ask(&["forbid-rm-root".into()]));
+        assert!(!should_ask(&["ask-before-kill".into(), "forbid-rm-root".into()]));
+    }
+
+    #[test]
+    fn should_not_ask_when_empty() {
+        assert!(!should_ask(&[]));
     }
 
     // --- File guard policy tests ---
