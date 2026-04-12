@@ -1,373 +1,442 @@
+<div align="center">
+
 # Veto
 
-**Stateless policy daemon that intercepts AI coding agent actions and enforces Cedar policies with YARA-X pre-scanning.**
+**Policy enforcement, audit, and governance for powerful coding agents.** Draft rules in **natural language**, publish them from a **central policy store**, and have the **same guardrails enforced on every developer machine**—with a full audit trail, on infrastructure you control.
 
-Your AI agent just ran `rm -rf /`. Or `git push --force`. Or exfiltrated your `.env` to pastebin. Veto sits between the agent and the shell, evaluating every action against declarative policies before it executes.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Rust Edition](https://img.shields.io/badge/edition-2024-orange.svg)](https://doc.rust-lang.org/edition-guide/rust-2024/index.html)
 
+### Quick install
+
+```bash
+cargo install --git https://github.com/samratjha96/veto.git
 ```
+
+**Or** clone and install from the repo root:
+
+```bash
+git clone https://github.com/samratjha96/veto.git
+cd veto
 cargo install --path .
 ```
+
+</div>
+
+---
 
 ## TL;DR
 
-**The problem:** AI coding agents execute shell commands, write files, and fetch URLs with broad permissions. One hallucination or prompt injection away from `terraform destroy` on your production infra.
+**The problem:** Powerful coding agents can run shell, rewrite files, and fetch URLs with little friction. Without shared governance, every machine is a snowflake—and one bad tool call can become an incident.
 
-**The solution:** Veto intercepts every action through Claude Code hooks, runs it through YARA pattern matching and Cedar policy evaluation, and returns allow/deny/ask -- all in under 0.5ms.
+**The solution:** Veto gives you **one policy regime for your whole org**: maintain Cedar policies in a **single source of truth** (for example a Git repo or package your platform team owns), **optionally draft new rules from natural language** (`veto policy add`), distribute that tree to each workstation, and run a **small local daemon** that enforces the same decisions everywhere. Every verdict is auditable. Typical adjudication stays **sub-millisecond** on commodity laptops (see [Performance](#performance)).
 
-| Feature                       | What it does                                                                                     |
-| ----------------------------- | ------------------------------------------------------------------------------------------------ |
-| **43 default policies**       | Blocks `rm -rf`, `git push --force`, `chmod 777`, `terraform destroy`, and 39 more out of the box |
-| **70+ YARA rules**            | Detects command injection, secrets exposure, exfiltration, prompt injection, supply chain attacks |
-| **Hot-reload**                | Add or edit `.cedar` files -- policies take effect in seconds, no restart                        |
-| **Natural language policies** | `veto policy add "block curl to non-HTTPS URLs"` generates Cedar via LLM                        |
-| **Process-aware**             | Knows when long-running processes exist before allowing `kill`                                   |
-| **Audit log**                 | Every decision logged to SQLite with timestamp, policy, and verdict                              |
-| **< 0.5ms p99**              | YARA + Cedar + verdict in under half a millisecond                                               |
+### Central governance, local enforcement
 
-## See It Work
+| What you centralize | What runs on each dev machine |
+|---------------------|-------------------------------|
+| The `policies/` tree (and who may change it) | `veto-server` reading `VETO_POLICY_DIR`, hot-reloading on updates |
+| How new rules are proposed (NL draft → review → merge) | Hooks so the agent cannot bypass the daemon |
 
-```bash
-# Start the daemon
-veto-server &
+Veto does not replace your delivery mechanism: use **Git**, configuration management, or internal packages to sync the policy directory to developers. The daemon only cares that the directory is present and up to date.
 
-# Safe command -- allowed
-echo '{"tool_name":"Bash","tool_input":{"command":"ls -la"}}' \
-  | veto hook --hook-type pre-tool-use
-# {"continue":true}
+### Why Veto?
 
-# Destructive command -- blocked
-echo '{"tool_name":"Bash","tool_input":{"command":"rm -rf /"}}' \
-  | veto hook --hook-type pre-tool-use
-# {"continue":true,"hookSpecificOutput":{"hookEventName":"PreToolUse",
-#   "permissionDecision":"deny","permissionDecisionReason":"forbid-rm-root"}}
+| Capability | What you get |
+|------------|----------------|
+| **Default guardrails** | **44** Cedar policies (destructive shell, file guards, severity gates) plus **72** YARA rules across 7 categories |
+| **Speed** | YARA + Cedar + verdict in **~0.3–0.4 ms** median; **&lt; ~0.5 ms** p99 (release build; see [Performance](#performance)) |
+| **Hot reload** | Edit `policies/*.cedar`; the daemon reloads without restart (file watcher + manual `veto reload`) |
+| **User prompts** | Cedar forbid policies whose `@id` contains `ask` become **Ask** (confirm) instead of silent **Deny**; medium+ YARA hits can **Ask** even when Cedar permits |
+| **Process context** | Optional enrichment for `kill`/`pkill`/`killall` (long-running processes) for tighter policies |
+| **Audit** | `veto audit` / `--tail` over `~/.veto/audit.db` |
+| **Natural language policies** | `veto policy add "..."` drafts Cedar for review; commit the result to your **central** policy repo so every machine inherits it after sync |
 
-# Suspicious URL -- asks the user
-echo '{"tool_name":"WebFetch","tool_input":{"url":"https://pastebin.com/upload"}}' \
-  | veto hook --hook-type pre-tool-use
-# {"continue":true,"hookSpecificOutput":{"hookEventName":"PreToolUse",
-#   "permissionDecision":"ask","permissionDecisionReason":"YARA matched 1 rule(s)..."}}
+---
 
-# Check the audit trail
-veto audit
-# ID  | TIMESTAMP            | HOOK           | TOOL     | DECISION | SUMMARY
-# --- | -------------------- | -------------- | -------- | -------- | ---------------------------
-# 3   | 2026-03-29 18:11:20  | pre-tool-use   | WebFetch | ask      | https://pastebin.com/upload
-# 2   | 2026-03-29 18:11:12  | pre-tool-use   | Bash     | deny     | rm -rf /
-# 1   | 2026-03-29 18:11:03  | pre-tool-use   | Bash     | allow    | ls -la
-```
-
-## The Demo Scenario
-
-This is the workflow Veto is built for:
+## Quick example
 
 ```bash
-# 1. Agent runs kill on a long-running process -- no kill policy yet, so it's allowed
-echo '{"tool_name":"Bash","tool_input":{"command":"kill 99999"}}' \
-  | veto hook --hook-type pre-tool-use
-# {"continue":true}
-
-# 2. You decide that's not okay. Add a policy in plain English:
-veto policy add "never kill running processes without asking me first"
-# Generating Cedar policy from: "never kill running processes without asking me first"
-# --- Generated Policy: forbid-kill-without-confirm ---
-# forbid(principal, action == Action::"ShellCommand", resource)
-# when { context.command like "*kill *" || ... };
-# Save to ./policies/forbid_kill_without_confirm.cedar? [Enter to confirm]
-
-# 3. Policy is live immediately (hot-reloaded). Agent tries kill again:
-echo '{"tool_name":"Bash","tool_input":{"command":"kill 99999"}}' \
-  | veto hook --hook-type pre-tool-use
-# {"continue":true,"hookSpecificOutput":{"hookEventName":"PreToolUse",
-#   "permissionDecision":"deny","permissionDecisionReason":"forbid-kill-without-confirm"}}
-
-# 4. Audit log shows both the allow and the deny:
-veto audit --limit 2
-# ID  | TIMESTAMP            | HOOK           | TOOL | DECISION | SUMMARY
-# --- | -------------------- | -------------- | ---- | -------- | ----------
-# 5   | 2026-03-29 18:12:22  | pre-tool-use   | Bash | deny     | kill 99999
-# 4   | 2026-03-29 18:11:37  | pre-tool-use   | Bash | allow    | kill 99999
-```
-
-## Quick Start
-
-```bash
-# 1. Build and install
-cargo install --path .
-
-# 2. Start the server (from the repo root, or set VETO_POLICY_DIR)
+# Terminal 1: daemon (set policy dir if not running from repo root)
+export VETO_POLICY_DIR=/path/to/veto/policies
 veto-server
 
-# 3. In another terminal, verify it's running
-veto ping    # pong
-veto status  # {"status":"ok","policy_count":43,"event_count":0}
+# Terminal 2: health check
+veto ping && veto status
 
-# 4. Wire up Claude Code hooks
-veto setup   # writes to .claude/settings.local.json
+# Dry-run without the server (same pipeline)
+veto test "rm -rf /"                    # exit 2 = deny
+veto test "echo hello"                  # exit 0 = allow
+veto test --tool WebFetch --url 'https://pastebin.com/upload'   # often exit 3 = ask (YARA)
 
-# 5. Start Claude Code -- Veto is now intercepting every action
+# Hook-shaped JSON (what Claude Code sends)
+echo '{"tool_name":"Bash","tool_input":{"command":"ls -la"}}' \
+  | veto hook --hook-type pre-tool-use
+
+# Audit trail
+veto audit --limit 10
+veto audit --decision deny --json
 ```
 
-## How It Works
+---
 
-Every action goes through a three-stage pipeline:
+## Design philosophy
+
+1. **Stateless per action** — No session store: each hook builds fresh Cedar entities from the payload, YARA signature, and optional process snapshot. Easier to reason about than multi-turn taint tracking.
+2. **Defense in depth** — YARA catches broad classes of misuse; Cedar encodes *your* org rules. Medium-or-higher YARA severity escalates to **Ask** even when no Cedar rule fires.
+3. **Local first** — Unix domain socket, SQLite audit log, policies on disk. No cloud dependency for adjudication (LLM is optional and only for `veto policy add`).
+4. **Agent-native I/O** — Responses match Claude Code hook JSON (`permissionDecision`, reasons) so the agent stops or prompts without custom clients.
+5. **Explicit policy IDs** — Cedar `@id` values surface as deny/ask reasons and in the audit log—no opaque scores.
+
+---
+
+## How Veto compares
+
+| | Veto | Shell aliases / one-off wrappers | Enterprise DLP only | “Trust the model” |
+|--|------|-----------------------------------|---------------------|-------------------|
+| Declarative policies (Cedar) | Yes | Rarely | Sometimes | No |
+| Fast pre-scan (YARA) | Yes | Ad hoc | Varies | No |
+| Sub-ms local decision | Yes | Varies | Often network-bound | N/A |
+| First-class Claude Code hooks | Yes | DIY | DIY | N/A |
+| Open source, self-hosted | Yes | N/A | Often proprietary | N/A |
+
+**Good fit:** you use Claude Code (or can emit the same hook JSON), you want **allow/deny/ask** with **auditability**, and you’re OK running a small local daemon.
+
+**Poor fit:** you need Windows-native support today (Unix socket + Claude hooks are the happy path), or you want a hosted SaaS with zero local processes.
+
+---
+
+## Installation
+
+### From GitHub (recommended)
+
+```bash
+cargo install --git https://github.com/samratjha96/veto.git
+```
+
+Installs two binaries: `veto` (CLI) and `veto-server` (daemon).
+
+### From a local clone
+
+```bash
+git clone https://github.com/samratjha96/veto.git
+cd veto
+cargo build --release
+# Binaries: target/release/veto, target/release/veto-server
+cargo install --path .   # copies into ~/.cargo/bin
+```
+
+### Requirements
+
+- **Rust** toolchain (2024 edition)
+- **macOS or Linux** for the Unix socket workflow (primary target)
+- **Claude Code** (or compatible hook JSON) if you use `veto setup` / `veto hook`
+
+---
+
+## Quick start
+
+1. **Install** (see above).
+
+2. **Policies:** point `VETO_POLICY_DIR` at a directory containing `*.cedarschema` and `*.cedar` (the repo’s `policies/` tree is the reference).
+
+3. **Start the daemon**
+
+   ```bash
+   export VETO_POLICY_DIR=/path/to/veto/policies
+   veto-server
+   ```
+
+4. **Verify**
+
+   ```bash
+   veto ping    # pong
+   veto status  # JSON with policy_count, event_count
+   ```
+
+5. **Wire Claude Code** (from the project where you want hooks)
+
+   ```bash
+   cd /path/to/your/project
+   veto setup # merges into .claude/settings.local.json
+   ```
+
+6. **Sanity check**
+
+   ```bash
+   veto doctor
+   ```
+
+---
+
+## Architecture
 
 ```
-              +--------------------------------+
-              |  Claude Code Hook JSON         |
-              |  (shell cmd, file op, URL)     |
-              +---------------+----------------+
-                              |
-              +---------------v----------------+
-              |  1. YARA-X Scan                |
-              |  70+ rules, 7 categories       |
-              |  -> severity + categories      |
-              +---------------+----------------+
-                              |
-              +---------------v----------------+
-              |  2. Cedar Policy Evaluation    |
-              |  43 policies, 6 action types   |
-              |  YARA results as context       |
-              +---+----------+----------+------+
-                  |          |          |
-         +--------v---+  +--v-------+  +--v--------+
-         | ALLOW      |  | DENY     |  | ASK       |
-         | continue   |  | + reason |  | prompt    |
-         +--------+---+  +--+-------+  +--+--------+
-                  |          |             |
-                  +----------+-------------+
++------------------------------------------------------------------+
+|  Claude Code (PreToolUse / PermissionRequest)                     |
+|  JSON on stdin -> veto hook --hook-type pre-tool-use              |
++------------------------------+------------------------------------+
+                               |
+                               v
++------------------------------------------------------------------+
+|  veto-server (Unix socket ~/.veto/veto.sock by default)          |
++------------------------------------------------------------------+
+                               |
+                               v
++------------------------------------------------------------------+
+|  1. Adapter: hook JSON -> scan text (command, path, URL, ...) |
++------------------------------------------------------------------+
+                               |
+                               v
++------------------------------------------------------------------+
+|  2. YARA-X: embedded rules/ -> SignatureContext                 |
+|     (severity, categories, matches)                             |
++------------------------------------------------------------------+
+                               |
+                               v
++------------------------------------------------------------------+
+|  3. Optional: process context for kill-like commands            |
++------------------------------------------------------------------+
+                               |
+                               v
++------------------------------------------------------------------+
+|  4. Cedar: PolicySet + schema -> Allow / Forbid (+ policy @id) |
++------------------------------------------------------------------+
+                               |
+              +----------------+----------------+
+              v                v                v
++-------------+ +-------------+      +-------------+
+| Allow       |      | Deny        |      | Ask         |
+| (continue)  |      | + reasons   |      | (prompt)    |
++-------------+      +-------------+      +-------------+
+              \ |              /
+               +-------------+-------------+
                              |
-              +--------------v-----------------+
-              |  3. SQLite Audit Log           |
-              |  Every decision recorded       |
-              +--------------------------------+
+                             v
++------------------------------------------------------------------+
+|  SQLite audit log (VETO_DB, default ~/.veto/audit.db)             |
++------------------------------------------------------------------+
+                             |
+                             v
++------------------------------------------------------------------+
+|  Hook JSON response (permissionDecision allow/deny/ask + reason)  |
++------------------------------------------------------------------+
 ```
 
-Entities are built fresh per request. No session state, no multi-turn tracking, no persistent entity store.
+Framing: length-prefixed JSON over the socket; no HTTP server in the default path.
 
-## CLI Reference
+---
+
+## Command reference
+
+Global socket override:
+
+```bash
+veto --socket /path/to/veto.sock ping
+# or VETO_SOCKET=/path/to/veto.sock
+```
 
 ### `veto-server`
 
-Long-lived daemon. Listens on `~/.veto/veto.sock`.
-
 ```bash
-veto-server                              # default config
-VETO_POLICY_DIR=./policies veto-server   # explicit policy dir
-RUST_LOG=debug veto-server               # verbose logging
+veto-server
+VETO_POLICY_DIR=./policies veto-server
+RUST_LOG=debug veto-server
 ```
-
-### `veto test`
-
-Dry-run a command through the pipeline without the server running.
-
-```bash
-veto test "rm -rf /"                         # shell command → DENY
-veto test "echo hello"                       # safe command → ALLOW
-veto test --tool Write --path /etc/passwd    # file write → DENY
-veto test --tool WebFetch --url https://evil.com  # web fetch
-veto test "git push --force" --verbose       # show YARA match details
-veto test "rm -rf /" --json                  # machine-readable output
-```
-
-Exit codes: `0` = allow, `2` = deny, `3` = ask.
 
 ### `veto hook`
-
-Forwards Claude Code hook events to the server. This is what the hooks configuration calls.
 
 ```bash
 echo '{"tool_name":"Bash","tool_input":{"command":"ls"}}' \
   | veto hook --hook-type pre-tool-use
 ```
 
+### `veto test` (no server)
+
+Dry-run the pipeline; exit codes: **0** allow, **2** deny, **3** ask.
+
+```bash
+veto test "rm -rf /"
+veto test --tool Write --path /etc/passwd
+veto test --tool WebFetch --url https://example.com
+veto test "git push --force" --verbose
+veto test "echo ok" --json
+```
+
 ### `veto policy`
 
 ```bash
-veto policy list                                    # show all loaded policies
-veto policy explain forbid-rm-root                  # show a policy's Cedar, description, and file
-veto policy search kill                             # find policies matching a keyword
-veto policy add "block all sudo commands"           # generate from natural language
-veto policy add "..." --dry-run                     # preview without saving
-veto policy remove my_policy                        # delete a policy file (with confirmation)
-veto policy template list                           # browse 11 curated templates
-veto policy template show no-kill                   # preview a template
-veto policy template apply no-kill                  # apply a template to the policy dir
+veto policy list
+veto policy explain forbid-rm-root
+veto policy search kill
+veto policy add "block curl to non-HTTPS URLs" --dry-run
+veto policy add "describe your rule"
+veto policy remove my_policy
+veto policy template list
+veto policy template show no-kill
+veto policy template apply no-kill
 ```
 
 ### `veto audit`
 
 ```bash
-veto audit                          # last 20 events
-veto audit --limit 50               # more events
-veto audit --decision deny          # only denials
-veto audit --hook-type pre-tool-use # filter by hook type
-veto audit --json                   # JSON output
-veto audit --tail                   # stream new events (like tail -f)
+veto audit
+veto audit --limit 50 --decision deny
+veto audit --hook-type pre-tool-use --json
+veto audit --tail --interval 2
 ```
 
-### Other Commands
+### Other
 
 ```bash
-veto ping                           # health check
-veto status                         # policy count, event count
-veto reload                         # force policy reload
-veto doctor                         # diagnose setup issues
-veto setup                          # write Claude Code hooks config
-veto bench                          # run pipeline microbenchmarks
+veto ping
+veto status
+veto reload
+veto doctor
+veto setup # write Claude hooks; use --print to stdout only
+veto bench --iterations 1000
 ```
 
-## Writing Policies
-
-Cedar policies live in `policies/`. The schema defines six actions:
-
-| Action         | Context Fields                                                                                     |
-| -------------- | -------------------------------------------------------------------------------------------------- |
-| `ShellCommand` | `command`, `working_dir`, `signature.*`, `has_long_running_process`, `longest_process_runtime_seconds` |
-| `WebFetch`     | `url`, `signature.*`                                                                               |
-| `FileRead`     | `path`, `signature.*`                                                                              |
-| `FileWrite`    | `path`, `signature.*`                                                                              |
-| `FileEdit`     | `path`, `signature.*`                                                                              |
-| `FileDelete`   | `path`, `signature.*`                                                                              |
-
-The `signature` context (from YARA) provides: `severity` (0-4), `categories` (set of strings), `match_count`.
-
-### Example: Block Force Pushes
-
-```cedar
-@id("forbid-git-force-push")
-@description("Block git push --force to prevent history rewriting.")
-forbid (
-    principal,
-    action == Action::"ShellCommand",
-    resource
-) when {
-    context.command like "*git push*--force*" ||
-    context.command like "*git push*-f *"
-};
-```
-
-### Example: Block Kill When Long-Running Processes Exist
-
-```cedar
-@id("forbid-kill-long-running")
-@description("Block kill commands when long-running user processes exist.")
-forbid (
-    principal,
-    action == Action::"ShellCommand",
-    resource
-) when {
-    (context.command like "*kill *" || context.command like "*pkill *") &&
-    context.has_long_running_process
-};
-```
-
-### Example: Block High-Severity Actions
-
-```cedar
-@id("block-high-severity")
-@description("Block any shell command with YARA severity >= High.")
-forbid (
-    principal,
-    action == Action::"ShellCommand",
-    resource
-) when {
-    context.signature.severity >= 3
-};
-```
-
-### Included Policies
-
-| File | Rules | Coverage |
-|------|-------|----------|
-| `base.cedar` | 4 | Default-permit baseline, severity gates for shell/web/file |
-| `destructive.cedar` | 29 | `rm -rf`, `git push --force`, `chmod 777`, `mkfs`, `terraform destroy`, `docker rm -f`, `DROP TABLE`, lockfile deletion, and more |
-| `file_guards.cedar` | 10 | Protects `/etc/passwd`, SSH keys, cloud credentials, `.env` files, shell profiles, git hooks |
-
-## YARA Rules
-
-Embedded at compile time from `rules/`. Seven categories:
-
-| File | Detects |
-|------|---------|
-| `destructive_ops.yar` | `rm -rf`, force push, disk format, partition delete, Docker/K8s teardown |
-| `injection.yar` | Command injection (`$()`, backticks, pipes to `sh`), SQL injection, reverse shells |
-| `secrets.yar` | AWS/GCP/Azure keys, JWTs, PGP keys, GitHub tokens, Slack webhooks, DB connection strings |
-| `exfil.yar` | DNS tunneling, curl/wget to external hosts, `.ssh` key access, steganography, paste sites |
-| `obfuscation.yar` | Base64/hex encoding, ROT13, decode+execute, polyglots |
-| `pi.yar` | Prompt injection (ignore instructions, role manipulation, credential extraction) |
-| `supply_chain.yar` | Package installs from URLs, `npm publish`, global installs, registry overrides |
+---
 
 ## Configuration
 
+Veto is configured with **environment variables**. Example shell profile snippet:
+
+```bash
+# --- Veto ---
+# Directory containing base.cedarschema, *.cedar
+export VETO_POLICY_DIR="$HOME/src/veto/policies"
+
+# Unix socket for veto-server (default: ~/.veto/veto.sock)
+# export VETO_SOCKET="$HOME/.veto/veto.sock"
+
+# SQLite audit database (default: ~/.veto/audit.db)
+# export VETO_DB="$HOME/.veto/audit.db"
+
+# Optional: natural-language policy generation (veto policy add)
+export API_KEY="sk-..."   # bearer token for your LLM vendor
+export LLM_GATEWAY_BASE_URL="https://api.openai.com/v1"
+export VETO_MODEL="gpt-4o-mini"
+
+# Logging: error, warn, info, debug, trace
+export RUST_LOG="info"
+```
+
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `VETO_POLICY_DIR` | `./policies` | Cedar policies and schema directory |
-| `VETO_SOCKET` | `~/.veto/veto.sock` | Unix socket path |
-| `VETO_DB` | `~/.veto/audit.db` | SQLite audit log path |
-| `API_KEY` | -- | Required for `veto policy add` (NL → Cedar); bearer token for the LLM gateway |
-| `LLM_GATEWAY_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible API root (chat completions) |
-| `VETO_MODEL` | `gpt-4o-mini` | Model id for policy generation (must match your gateway) |
-| `RUST_LOG` | `info` | Tracing filter |
+| `VETO_POLICY_DIR` | `./policies` (relative to **server** cwd if unset) | Cedar policies + schema |
+| `VETO_SOCKET` | `~/.veto/veto.sock` | Daemon socket |
+| `VETO_DB` | `~/.veto/audit.db` | Audit SQLite |
+| `API_KEY` | (unset) | Required for `veto policy add` |
+| `LLM_GATEWAY_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible `/v1` root |
+| `VETO_MODEL` | `gpt-4o-mini` | Chat model id |
+| `RUST_LOG` | `info` | `tracing` filter |
+
+---
+
+## Policies and YARA (summary)
+
+- **Cedar:** `policies/*.cedar` with `@id("...")` annotations; actions include `ShellCommand`, `WebFetch`, `FileRead` / `FileWrite` / `FileEdit` / `FileDelete`. Context includes YARA `signature.*` and optional process fields for kill-like commands.
+- **“Ask” policies:** if every firing forbid policy’s `@id` contains the substring `ask`, the verdict is **Ask** instead of **Deny** (Cedar has no built-in third effect).
+- **YARA:** rules under `rules/*.yar` are **compiled into the binary**; changing rules requires a **rebuild**. Policies can still be edited live on disk.
+
+Included policy files (representative): `base.cedar`, `destructive.cedar`, `file_guards.cedar`, `ask_before_kill.cedar`.
+
+---
 
 ## Performance
 
-Release build benchmarks on Apple Silicon:
+Release-oriented microbenchmarks (see `veto bench`; hardware-dependent):
 
-| Stage | Median | p99 |
-|-------|--------|-----|
-| YARA scan | ~220 us | ~300 us |
-| Cedar eval | ~60 us | ~100 us |
-| Full pipeline | ~340 us | ~400 us |
+| Stage | Median (approx.) | p99 (approx.) |
+|-------|------------------|---------------|
+| YARA scan | ~220 µs | ~300 µs |
+| Cedar eval | ~60 µs | ~100 µs |
+| Full pipeline | ~340 µs | ~400 µs |
 
-All p99 latencies under 0.5ms. Your agent won't notice.
+---
 
 ## Troubleshooting
 
-### "veto-server is not running (socket not found)"
-
-The server isn't running or the socket path doesn't match.
+### `veto-server is not running (socket not found)`
 
 ```bash
-veto-server                    # start it
-VETO_SOCKET=/path/to/sock veto ping  # check with explicit path
+veto-server
+VETO_SOCKET=/path/to/sock veto ping
 ```
 
-### "Policy directory not found"
-
-Run `veto-server` from the repo root, or set `VETO_POLICY_DIR`:
+### Policy directory missing
 
 ```bash
-VETO_POLICY_DIR=/path/to/policies veto-server
+VETO_POLICY_DIR=/absolute/path/to/policies veto-server
 ```
 
-### "API_KEY env var required"
+### `API_KEY env var required`
 
-Only needed for `veto policy add`. Set your provider key and, if needed, the gateway URL:
+Only affects `veto policy add`. Set `API_KEY`, and if needed `LLM_GATEWAY_BASE_URL` / `VETO_MODEL`, then retry.
 
-```bash
-export API_KEY=sk-...
-export LLM_GATEWAY_BASE_URL=https://api.openai.com/v1
-export VETO_MODEL=gpt-4o-mini
-```
-
-### Diagnose Everything at Once
+### Full diagnostics
 
 ```bash
 veto doctor
-# [+] policy directory          1 schema, 3 policies
-# [+] cedar policies            43 policies loaded and validated
-# [+] yara rules                compiled and scanner functional
-# [+] audit database            /Users/you/.veto/audit.db (42 events)
-# [+] veto-server               running (43 policies)
-# [+] claude hooks              configured in .claude/settings.local.json
-# [~] llm (policy add)         API_KEY not set (policy add unavailable)
 ```
 
-## Testing
+---
+
+## Limitations
+
+- **Platform:** Unix socket workflow is aimed at **macOS/Linux**. Windows is not a first-class target.
+- **Agent integration:** Hook JSON and `veto setup` target **Claude Code** conventions; other agents need their own adapter or manual hook wiring.
+- **YARA updates:** rule changes require **recompiling** the crate (rules are `include_dir!` embedded).
+- **Threat model:** Veto guards the **agent’s tool path**, not a compromised host kernel, malicious binaries already on disk, or users who bypass hooks.
+- **NL policies:** `veto policy add` quality depends on the LLM and your prompts; always review generated Cedar before trusting it in production.
+- **Fleet rollout:** there is no hosted multi-tenant control plane—you distribute the policy directory with the same Git / MDM / packaging tools you already use.
+
+---
+
+## FAQ
+
+### How do the same policies end up on every developer machine?
+
+You keep **one canonical `policies/` tree** (typically in Git or an internal artifact). Sync it to each workstation—`git pull`, configuration management, MDM, or a package your platform team publishes—then point `VETO_POLICY_DIR` at that path and run `veto-server`. Updates **hot-reload** when files change. Use **`veto policy add`** on a maintainer machine to draft text; **merge reviewed Cedar** into the central tree so the next sync rolls the rule out everywhere.
+
+### Why Cedar and YARA together?
+
+YARA is a fast, pattern-first signal (secrets, exfil patterns, destructive idioms). Cedar is a small, analyzable policy language for explicit permits and forbids with structured context—including YARA severity and categories.
+
+### Does Veto replace secrets scanners or EDR?
+
+No. It’s a **focused control** for **agent-issued** commands and tool I/O, with auditing.
+
+### Can I use a different LLM vendor?
+
+Yes. Any **OpenAI-compatible** chat completions server works: set `LLM_GATEWAY_BASE_URL` to its `/v1` base and pick a matching `VETO_MODEL`.
+
+### What if multiple Cedar policies forbid an action?
+
+Diagnostics aggregate policy ids; **Ask** only applies when **every** matched id contains `ask`—otherwise you get **Deny**.
+
+### How do I test policies in CI?
+
+Use `veto test` with explicit `VETO_POLICY_DIR` and assert exit codes (`0` / `2` / `3`) or `--json` output.
+
+---
+
+## Developing
 
 ```bash
-cargo test            # 27 unit + integration tests
+cargo test   # unit + integration tests (~160+ in the main crate; plus integration harness)
+cargo build --release
 ```
+
+---
+
+## Contributing
+
+Issues and PRs welcome. Please run `cargo test` before submitting changes.
+
+---
 
 ## License
 

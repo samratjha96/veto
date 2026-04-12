@@ -2,7 +2,7 @@
 name = "veto"
 version = "0.1.0"
 edition = "2024"
-description = "Stateless per-action policy daemon for AI coding agents"
+description = "Policy enforcement, audit, and governance for coding agents; central policies, enforced on every machine"
 license = "MIT"
 
 [[bin]]
