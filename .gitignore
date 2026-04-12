@@ -1,2 +1,6 @@
 /target
 agent_logs/
+
+# Local / agent workflow — not for publication
+AGENT_PROMPT.md
+PROGRESS.md
