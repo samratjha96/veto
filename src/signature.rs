@@ -1,7 +1,6 @@
 //! YARA-X scanning (rules embedded from `rules/` at crate root).
 
 use include_dir::{Dir, include_dir};
-use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::OnceLock;
@@ -140,24 +139,6 @@ pub fn scan(content: &str) -> SignatureContext {
         matches,
         categories,
         severity: max_severity,
-    }
-}
-
-/// Serializable summary for SQLite / JSON.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MatchSummary {
-    pub identifier: String,
-    pub category: Option<String>,
-    pub severity: Option<String>,
-}
-
-impl From<&Match> for MatchSummary {
-    fn from(m: &Match) -> Self {
-        Self {
-            identifier: m.identifier.clone(),
-            category: m.metadata.get("category").cloned(),
-            severity: m.metadata.get("severity").cloned(),
-        }
     }
 }
 

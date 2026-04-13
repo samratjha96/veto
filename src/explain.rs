@@ -167,7 +167,7 @@ pub fn find_policy(policy_dir: &Path, policy_id: &str) -> anyhow::Result<Option<
 }
 
 /// List all policy IDs and their descriptions.
-pub fn list_all(policy_dir: &Path) -> anyhow::Result<Vec<PolicyInfo>> {
+fn list_all(policy_dir: &Path) -> anyhow::Result<Vec<PolicyInfo>> {
     if !policy_dir.is_dir() {
         anyhow::bail!("Policy directory not found: {}", policy_dir.display());
     }

@@ -2,20 +2,8 @@
 
 use serde_json::Value;
 
-pub fn clone_tool_input(v: &Value) -> Value {
-    v.get("tool_input").cloned().unwrap_or(Value::Null)
-}
-
 pub fn bash_command(input: &Value) -> &str {
     input.get("command").and_then(|c| c.as_str()).unwrap_or("")
-}
-
-pub fn bash_working_dir(input: &Value) -> &str {
-    input
-        .get("working_directory")
-        .or_else(|| input.get("cwd"))
-        .and_then(|c| c.as_str())
-        .unwrap_or("")
 }
 
 pub fn webfetch_url(input: &Value) -> &str {
@@ -86,10 +74,5 @@ mod tests {
             file_text_for_scan(&json!({"new_string": "replacement"})),
             "replacement"
         );
-    }
-
-    #[test]
-    fn clone_tool_input_returns_null_when_missing() {
-        assert_eq!(clone_tool_input(&json!({})), Value::Null);
     }
 }
