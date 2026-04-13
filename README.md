@@ -2,7 +2,7 @@
 
 # Veto
 
-**Shared safety rails for coding agents** (for example **Claude Code**, **Codex**, **OpenCode**, **Pi**, and similar tools that run shell and tools on your behalf). Agents are most useful when they can run commands, edit files, and use the network—but you should not ask every developer to maintain their own blocklists and “don’t do this” notes. Veto lets a team or company define **one set of rules**, distribute them from a **single place** (usually a repo or package you already use), and have each developer run a **small local service plus editor hooks** so the same protections apply everywhere—with an audit log when something is blocked or questioned.
+**One shared policy layer for coding agents** — **Claude Code**, **Codex**, **OpenCode**, **Pi**, and anything else that can call **`veto hook`**. Rules live in one place; every machine enforces them locally and logs what happened.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust Edition](https://img.shields.io/badge/edition-2024-orange.svg)](https://doc.rust-lang.org/edition-guide/rust-2024/index.html)
@@ -27,9 +27,7 @@ cargo install --path .
 
 ## TL;DR
 
-**The problem:** Coding agents work best with broad permission to run shell, edit files, and fetch URLs. If each person maintains their own “forbidden command” list, coverage is uneven and risky behavior slips through.
-
-**The solution:** Maintain **org- or team-wide rules** in one place (for example a Git repo). Each developer runs **`veto-server`** pointed at that policy folder and wires **hooks** from their agent—**Claude Code**, **Codex**, **OpenCode**, **Pi**, or anything else that can send the same **pre-tool hook JSON** to **`veto hook`**—so every tool call is checked locally before it runs. (**`veto setup`** is the turnkey path for **Claude Code**; other agents follow their docs to call **`veto hook`** the same way.) You change the rules **once**; after updated policy files land on a machine—via `git pull`, your config management, or packages—the daemon **picks them up automatically**. Developers do **not** need to restart the daemon or run a separate “apply policy” step for Cedar edits. Decisions are fast (**sub-millisecond** typical; see [Performance](#performance)) and **logged** for review.
+Agents need real access to shell, files, and URLs; asking everyone to curate their own “don’t do this” lists doesn’t scale. Veto keeps **one shared `policies/` tree** (often a Git repo), runs **`veto-server`** on each machine, and wires **hooks** so **Claude Code**, **Codex**, **OpenCode**, **Pi**, or any tool that can hit **`veto hook`** with the same pre-tool JSON gets the same checks before a run. **`veto setup`** is the turnkey path for Claude Code; others follow their product docs. Ship policy updates once, sync the folder however you already do (`git pull`, MDM, packages)—**`*.cedar` reloads live** without restarting the daemon. Typical adjudication is **sub-millisecond** (see [Performance](#performance)); outcomes are **audited** (`veto audit`).
 
 ### Who maintains what
 
