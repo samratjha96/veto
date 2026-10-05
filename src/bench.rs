@@ -171,7 +171,7 @@ pub fn run_all(policy_dir: &Path, iterations: usize) -> anyhow::Result<Vec<Bench
         let tool = case.payload.get("tool_name").and_then(|v| v.as_str());
         let label = format!("cedar_eval/{}", case.name);
         let mut samples = warmup_then_measure(
-            || { cedar.evaluate(&case.kind, tool, &case.payload, &sig, None).unwrap(); },
+            || { cedar.evaluate(&case.kind, tool, &case.payload, &sig, None, None).unwrap(); },
             warmup,
             iterations,
         );

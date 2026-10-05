@@ -49,10 +49,14 @@ pub fn adjudicate(
                 policy_id: None,
             };
             for command in &analysis.commands {
-                let mut payload = hook_payload.clone();
-                payload["tool_input"]["command"] = Value::String(command.clone());
-                let decision =
-                    cedar.evaluate(kind, tool_name.as_deref(), &payload, &sig, process_ctx)?;
+                let decision = cedar.evaluate(
+                    kind,
+                    tool_name.as_deref(),
+                    hook_payload,
+                    &sig,
+                    process_ctx,
+                    Some(command),
+                )?;
                 combined.allowed &= decision.allowed;
                 for reason in decision.deny_reasons {
                     if !combined.deny_reasons.contains(&reason) {
@@ -69,6 +73,7 @@ pub fn adjudicate(
             hook_payload,
             &sig,
             process_ctx,
+            None,
         )?,
     };
     let unresolved = shell_analysis.map(|a| a.unresolved).unwrap_or_default();

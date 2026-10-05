@@ -27,6 +27,11 @@ type ProcessContext = {
 // ShellCommand context (pre-execution).
 type ShellCommandContext = {
     command: String,
+    // Resolved by the shell parser; subcommand and flags are empty unless a
+    // command spec describes the program (see src/command_spec.rs).
+    program: String,
+    subcommand: String,
+    flags: Set<String>,
     working_dir: String,
     signature: SignatureContext,
     has_long_running_process: Bool,

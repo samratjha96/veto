@@ -1,0 +1,44 @@
+program = "git"
+global_value_options = ["-c", "-C", "--git-dir", "--work-tree", "--namespace", "--exec-path"]
+
+[subcommands.push]
+value_options = ["-o", "--push-option", "--repo", "--receive-pack", "--exec"]
+short = { f = "force", d = "delete", u = "set-upstream", n = "dry-run", q = "quiet", v = "verbose", o = "push-option" }
+# `git push origin +main` forces; `git push origin :main` deletes.
+prefix_flags = { "+" = "force", ":" = "delete" }
+
+[[examples]]
+command = "git push --force origin main"
+subcommand = "push"
+flags = ["force"]
+
+[[examples]]
+command = "git -c user.name=x -C /repo push -uf origin main"
+subcommand = "push"
+flags = ["force", "set-upstream"]
+
+[[examples]]
+command = "git push origin +main"
+subcommand = "push"
+flags = ["force"]
+
+[[examples]]
+command = "git push -d origin old"
+subcommand = "push"
+flags = ["delete"]
+
+[[examples]]
+command = "git push origin :old"
+subcommand = "push"
+flags = ["delete"]
+
+# The value of -o is not a refspec.
+[[examples]]
+command = "git push -o +ci.skip origin main"
+subcommand = "push"
+flags = ["push-option"]
+
+[[examples]]
+command = "git status"
+subcommand = "status"
+flags = []

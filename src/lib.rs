@@ -3,6 +3,7 @@ pub mod adjudicate;
 pub mod audit;
 pub mod bench;
 pub mod cedar_runtime;
+pub mod command_spec;
 pub mod config;
 pub mod doctor;
 pub mod explain;

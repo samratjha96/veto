@@ -37,7 +37,7 @@ The following Cedar schema defines the entity types, actions, and context types 
 3. The `@id` should be a kebab-case identifier derived from the user's intent.
 4. The principal is always `Agent`, the resource is always `Resource`.
 5. Use `context.*` fields from the schema to match conditions.
-6. For ShellCommand matching, use `context.command like "*pattern*"`.
+6. For ShellCommand matching, use `context.command like "*pattern*"`, or `context.program`, `context.subcommand` and `context.flags` where the tool is described in src/command_spec.rs (currently git push).
 7. For file path matching, use `context.path like "*pattern*"`.
 8. For URL matching, use `context.url like "*pattern*"`.
 9. Use `||` (or) for multiple patterns and `&&` (and) for combined conditions.
@@ -45,7 +45,7 @@ The following Cedar schema defines the entity types, actions, and context types 
 
 ## Available Actions
 
-- `Action::"ShellCommand"` — shell/terminal commands (context has: command, working_dir, signature, has_long_running_process, longest_process_runtime_seconds)
+- `Action::"ShellCommand"` — shell/terminal commands (context has: command, program, subcommand, flags (canonical flag names, set), working_dir, signature, has_long_running_process, longest_process_runtime_seconds)
 - `Action::"WebFetch"` — HTTP requests (context has: url, signature)
 - `Action::"FileRead"` — reading files (context has: path, signature)
 - `Action::"FileWrite"` — writing files (context has: path, signature)

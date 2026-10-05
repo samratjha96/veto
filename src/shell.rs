@@ -6,6 +6,7 @@
 //! returns each simple command as canonical text (`rm -rf /`), so policies
 //! match what runs instead of how it was spelled.
 
+use crate::command_spec;
 use brush_parser::ast::{
     AndOr, AndOrList, AssignmentName, AssignmentValue, Command, CommandPrefixOrSuffixItem,
     CompoundCommand, CompoundList, IoFileRedirectKind, IoFileRedirectTarget, IoRedirect, Pipeline,
@@ -23,12 +24,53 @@ const PREFIX_WRAPPERS: &[&str] = &[
 const SHELLS: &[&str] = &["sh", "bash", "zsh", "dash", "ksh"];
 const MAX_DEPTH: usize = 5;
 
+/// One simple command as the shell would run it.
+#[derive(Debug)]
+pub struct Invocation {
+    /// Canonical text, e.g. `rm -rf /`.
+    pub text: String,
+    pub program: String,
+    /// Empty unless a command spec describes the program.
+    pub subcommand: String,
+    /// Canonical flag names from the command spec; empty without one.
+    pub flags: Vec<String>,
+}
+
+impl Invocation {
+    fn new(argv: &[String], redirects: &[String]) -> Self {
+        let mut argv = argv.to_vec();
+        argv[0] = basename(&argv[0]).to_string();
+        let facts = command_spec::describe(&argv);
+        let mut text = argv.join(" ");
+        for redirect in redirects {
+            text.push(' ');
+            text.push_str(redirect);
+        }
+        Self {
+            text,
+            program: argv[0].clone(),
+            subcommand: facts.subcommand,
+            flags: facts.flags,
+        }
+    }
+
+    /// Text that could not be parsed: policies see it as written.
+    fn unparsed(text: &str) -> Self {
+        Self {
+            text: text.to_string(),
+            program: String::new(),
+            subcommand: String::new(),
+            flags: Vec::new(),
+        }
+    }
+}
+
 /// What a command string runs, as the shell would see it.
 #[derive(Debug, Default)]
 pub struct Analysis {
-    /// Canonical text of every simple command, including those nested in
-    /// `bash -c`, `eval`, command substitutions and wrappers like `sudo`.
-    pub commands: Vec<String>,
+    /// Every simple command, including those nested in `bash -c`, `eval`,
+    /// command substitutions and wrappers like `sudo`.
+    pub commands: Vec<Invocation>,
     /// Reasons the real command cannot be known before it runs.
     pub unresolved: Vec<String>,
 }
@@ -37,7 +79,7 @@ pub fn analyze(command: &str) -> Analysis {
     let mut walker = Walker::default();
     if !walker.program(command, 0) {
         // Policies still see the raw text when it cannot be parsed.
-        walker.analysis.commands.push(command.to_string());
+        walker.analysis.commands.push(Invocation::unparsed(command));
     }
     walker.analysis
 }
@@ -207,12 +249,9 @@ impl Walker {
             .iter()
             .filter_map(|r| self.redirect(r, depth))
             .collect();
-        let mut canonical = argv.join(" ");
-        for r in &redirect_text {
-            canonical.push(' ');
-            canonical.push_str(r);
-        }
-        self.analysis.commands.push(canonical);
+        self.analysis
+            .commands
+            .push(Invocation::new(&argv, &redirect_text));
 
         self.nested_commands(&argv, depth);
         Some(argv)
@@ -222,11 +261,7 @@ impl Walker {
     fn nested_commands(&mut self, argv: &[String], depth: usize) {
         let mut rest = argv;
         while let Some(inner) = strip_wrapper(rest) {
-            let mut canonical = inner.join(" ");
-            if let Some(first) = inner.first() {
-                canonical = canonical.replacen(first, basename(first), 1);
-            }
-            self.analysis.commands.push(canonical);
+            self.analysis.commands.push(Invocation::new(inner, &[]));
             rest = inner;
         }
 
@@ -473,7 +508,7 @@ mod tests {
     use super::*;
 
     fn commands(src: &str) -> Vec<String> {
-        analyze(src).commands
+        analyze(src).commands.into_iter().map(|c| c.text).collect()
     }
 
     #[test]
