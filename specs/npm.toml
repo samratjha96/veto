@@ -27,6 +27,7 @@ value_options = ["--script-shell", "-w", "--workspace"]
 aliases = ["x"]
 short = { c = "call", w = "workspace", y = "yes" }
 value_options = ["--package", "-c", "--call", "-w", "--workspace"]
+code_options = ["-c", "--call"]
 
 [[examples]]
 command = "npm install left-pad"

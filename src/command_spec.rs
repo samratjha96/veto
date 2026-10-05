@@ -76,6 +76,10 @@ struct Subcommand {
     /// cluster as the value (`-ofile`) before taking the next argument.
     #[serde(default)]
     value_options: Vec<String>,
+    /// Value options whose value is code the tool runs (`git -c core.pager=...`),
+    /// so it stays visible to the signature scan instead of counting as data.
+    #[serde(default)]
+    code_options: Vec<String>,
     /// A positional argument starting with the prefix implies the flag.
     #[serde(default)]
     prefix_flags: HashMap<String, String>,
@@ -150,7 +154,7 @@ pub fn describe(argv: &[String]) -> Facts {
                 break;
             }
             if tool.global_value_options.contains(arg) {
-                data.extend(args.next().map(|(i, _)| i));
+                consume_value(&mut args, Some(&tool.options), arg, &mut data);
             }
         }
         let Some(word) = word else {
@@ -195,7 +199,7 @@ pub fn describe(argv: &[String]) -> Facts {
             };
             flags.push(name.to_string());
             if !has_value && takes_value(spec, arg) {
-                data.extend(args.next().map(|(i, _)| i));
+                consume_value(&mut args, spec, arg, &mut data);
             }
         } else {
             let cluster = &arg[1..];
@@ -206,7 +210,7 @@ pub fn describe(argv: &[String]) -> Facts {
                 flags.push(name);
                 if takes_value(spec, &format!("-{c}")) {
                     if i + c.len_utf8() == cluster.len() {
-                        data.extend(args.next().map(|(i, _)| i));
+                        consume_value(&mut args, spec, &format!("-{c}"), &mut data);
                     }
                     break;
                 }
@@ -226,6 +230,22 @@ pub fn describe(argv: &[String]) -> Facts {
         flags,
         data,
         effects,
+    }
+}
+
+/// Takes the next argument as the value of `option`, recording it as data
+/// unless the spec says it is code.
+fn consume_value<'a>(
+    args: &mut impl Iterator<Item = (usize, &'a String)>,
+    spec: Option<&Subcommand>,
+    option: &str,
+    data: &mut Vec<usize>,
+) {
+    let is_code = spec.is_some_and(|s| s.code_options.iter().any(|o| o == option));
+    if let Some((i, _)) = args.next()
+        && !is_code
+    {
+        data.push(i);
     }
 }
 
