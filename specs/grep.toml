@@ -1,0 +1,7 @@
+program = "grep"
+arguments_are_data = true
+
+[[examples]]
+command = "grep x y"
+subcommand = ""
+flags = []

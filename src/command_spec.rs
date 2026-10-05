@@ -18,6 +18,9 @@ pub struct Facts {
     pub program: String,
     pub subcommand: String,
     pub flags: Vec<String>,
+    /// Indexes into argv of arguments that are plain data to the tool (option
+    /// values, or everything for a tool whose arguments are text), not code or paths.
+    pub data: Vec<usize>,
 }
 
 /// One tool's spec file in `specs/`.
@@ -34,6 +37,10 @@ struct Tool {
     /// (`cargo +nightly run`).
     #[serde(default)]
     skipped_prefixes: Vec<String>,
+    /// Every argument is text for the tool to print or match, never a command or
+    /// path (`echo`, `grep`).
+    #[serde(default)]
+    arguments_are_data: bool,
     /// Multi-character options use a single dash (`find -delete`, `terraform
     /// -auto-approve`), so `-abc` is the option `abc`, not the cluster `-a -b -c`.
     #[serde(default)]
@@ -99,12 +106,13 @@ pub fn describe(argv: &[String]) -> Facts {
         return Facts::default();
     };
 
-    let mut args = argv[1..].iter();
+    let mut data = Vec::new();
+    let mut args = argv.iter().enumerate().skip(1);
     let (subcommand, spec) = if tool.subcommands.is_empty() {
         (String::new(), Some(&tool.options))
     } else {
         let mut word = None;
-        while let Some(arg) = args.next() {
+        while let Some((_, arg)) = args.next() {
             if tool
                 .skipped_prefixes
                 .iter()
@@ -117,7 +125,7 @@ pub fn describe(argv: &[String]) -> Facts {
                 break;
             }
             if tool.global_value_options.contains(arg) {
-                args.next();
+                data.extend(args.next().map(|(i, _)| i));
             }
         }
         let Some(word) = word else {
@@ -137,7 +145,7 @@ pub fn describe(argv: &[String]) -> Facts {
         |option: &str| spec.is_some_and(|s| s.value_options.iter().any(|o| o == option));
     let mut flags = Vec::new();
     let mut options_ended = false;
-    while let Some(arg) = args.next() {
+    while let Some((_, arg)) = args.next() {
         if options_ended || !arg.starts_with('-') || arg == "-" {
             for (prefix, flag) in spec.iter().flat_map(|s| &s.prefix_flags) {
                 if arg.starts_with(prefix.as_str()) {
@@ -154,7 +162,7 @@ pub fn describe(argv: &[String]) -> Facts {
             };
             flags.push(name.to_string());
             if !has_value && takes_value(arg) {
-                args.next();
+                data.extend(args.next().map(|(i, _)| i));
             }
         } else {
             let cluster = &arg[1..];
@@ -165,7 +173,7 @@ pub fn describe(argv: &[String]) -> Facts {
                 flags.push(name);
                 if takes_value(&format!("-{c}")) {
                     if i + c.len_utf8() == cluster.len() {
-                        args.next();
+                        data.extend(args.next().map(|(i, _)| i));
                     }
                     break;
                 }
@@ -175,10 +183,14 @@ pub fn describe(argv: &[String]) -> Facts {
     flags.sort();
     flags.dedup();
 
+    if tool.arguments_are_data {
+        data = (1..argv.len()).collect();
+    }
     Facts {
         program: tool.program.clone(),
         subcommand,
         flags,
+        data,
     }
 }
 

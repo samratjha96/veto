@@ -27,8 +27,18 @@ pub fn adjudicate(
     let scan_text = payload::scan_target(kind, hook_payload);
     let tool_name = payload::tool_name(hook_payload);
 
-    // 2. YARA scan.
-    let sig = signature::scan(&scan_text);
+    // 2. Parse shell commands, then YARA scan. Signatures read what the commands
+    // are, not text they merely carry (`echo "rm -rf /"`). Anything the parser could
+    // not resolve is scanned as written, so signatures stay the backstop for it.
+    let shell_analysis = (kind.cedar_action(tool_name.as_deref()) == "ShellCommand")
+        .then(|| shell::analyze(&scan_text));
+    let sig = match &shell_analysis {
+        Some(a) if a.unresolved.is_empty() && !a.commands.is_empty() => {
+            let commands: Vec<&str> = a.commands.iter().map(|c| c.scan_text.as_str()).collect();
+            signature::scan(&commands.join(" ; "))
+        }
+        _ => signature::scan(&scan_text),
+    };
 
     // 3. Process context enrichment for kill commands.
     let process_ctx = if is_kill_command(&scan_text) {
@@ -39,8 +49,6 @@ pub fn adjudicate(
 
     // 4. Cedar evaluation. A shell command is judged as the shell would run it,
     // one simple command at a time, so quoting and wrappers cannot hide it.
-    let shell_analysis = (kind.cedar_action(tool_name.as_deref()) == "ShellCommand")
-        .then(|| shell::analyze(&scan_text));
     let cedar_decision = match &shell_analysis {
         Some(analysis) if !analysis.commands.is_empty() => {
             let mut combined = CedarDecision {
@@ -215,13 +223,19 @@ mod tests {
     #[test]
     fn should_ask_when_all_policies_contain_ask() {
         assert!(should_ask(&["ask-before-kill".into()]));
-        assert!(should_ask(&["ask-before-kill".into(), "ask-before-rm".into()]));
+        assert!(should_ask(&[
+            "ask-before-kill".into(),
+            "ask-before-rm".into()
+        ]));
     }
 
     #[test]
     fn should_not_ask_when_any_policy_is_hard_deny() {
         assert!(!should_ask(&["forbid-rm-root".into()]));
-        assert!(!should_ask(&["ask-before-kill".into(), "forbid-rm-root".into()]));
+        assert!(!should_ask(&[
+            "ask-before-kill".into(),
+            "forbid-rm-root".into()
+        ]));
     }
 
     #[test]
