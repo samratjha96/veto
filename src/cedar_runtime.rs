@@ -32,6 +32,19 @@ pub struct CedarDecision {
     pub policy_id: Option<String>,
 }
 
+impl CedarDecision {
+    /// Combines two decisions: allowed only if both allow, reasons deduplicated.
+    pub fn merge(&mut self, other: CedarDecision) {
+        self.allowed &= other.allowed;
+        for reason in other.deny_reasons {
+            if !self.deny_reasons.contains(&reason) {
+                self.deny_reasons.push(reason);
+            }
+        }
+        self.policy_id = self.policy_id.take().or(other.policy_id);
+    }
+}
+
 fn load_policies_and_schema(policy_dir: &Path) -> Result<(PolicySet, Schema)> {
     let mut schema_fragments: Vec<SchemaFragment> = Vec::new();
     let mut policy_set = PolicySet::new();
@@ -102,10 +115,7 @@ fn signature_json(ctx: &SignatureContext) -> Value {
 impl CedarRuntime {
     pub fn load(policy_dir: &Path) -> Result<Self> {
         let (policy_set, schema) = load_policies_and_schema(policy_dir)?;
-        let inner = Inner {
-            schema,
-            policy_set,
-        };
+        let inner = Inner { schema, policy_set };
         Ok(Self {
             authorizer: Authorizer::new(),
             inner: Arc::new(RwLock::new(inner)),
@@ -167,10 +177,7 @@ impl CedarRuntime {
                 });
                 let working_dir = payload
                     .get("tool_input")
-                    .and_then(|i| {
-                        i.get("working_directory")
-                            .or_else(|| i.get("cwd"))
-                    })
+                    .and_then(|i| i.get("working_directory").or_else(|| i.get("cwd")))
                     .and_then(|c| c.as_str())
                     .unwrap_or("");
                 let (has_long, longest) = process_ctx.unwrap_or((false, 0));
@@ -202,8 +209,9 @@ impl CedarRuntime {
                     .and_then(|i| i.get("file_path"))
                     .and_then(|p| p.as_str())
                     .unwrap_or("");
+                let cwd = payload.get("cwd").and_then(|c| c.as_str()).unwrap_or("");
                 json!({
-                    "path": path,
+                    "path": crate::effects::normalize_path(path, cwd),
                     "signature": signature_json(sig),
                 })
             }
@@ -232,11 +240,10 @@ impl CedarRuntime {
             agent_attrs,
             std::collections::HashSet::new(),
         )?;
-        let resource_entity = Entity::new_no_attrs(resource_uid.clone(), std::collections::HashSet::new());
-        let entities = Entities::from_entities(
-            [agent_entity, resource_entity],
-            Some(&inner.schema),
-        )?;
+        let resource_entity =
+            Entity::new_no_attrs(resource_uid.clone(), std::collections::HashSet::new());
+        let entities =
+            Entities::from_entities([agent_entity, resource_entity], Some(&inner.schema))?;
 
         let request = Request::new(
             principal_uid,
@@ -246,7 +253,9 @@ impl CedarRuntime {
             Some(&inner.schema),
         )?;
 
-        let response = self.authorizer.is_authorized(&request, &inner.policy_set, &entities);
+        let response = self
+            .authorizer
+            .is_authorized(&request, &inner.policy_set, &entities);
 
         let allowed = matches!(response.decision(), cedar_policy::Decision::Allow);
         let deny_reasons: Vec<String> = response
@@ -289,7 +298,14 @@ mod tests {
         });
         let sig = SignatureContext::default();
         let decision = rt
-            .evaluate(&HookKind::BeforeTool, Some("Bash"), &payload, &sig, None, None)
+            .evaluate(
+                &HookKind::BeforeTool,
+                Some("Bash"),
+                &payload,
+                &sig,
+                None,
+                None,
+            )
             .unwrap();
         assert!(decision.allowed, "safe command should be allowed");
     }
@@ -303,7 +319,14 @@ mod tests {
         });
         let sig = SignatureContext::default();
         let decision = rt
-            .evaluate(&HookKind::BeforeTool, Some("Bash"), &payload, &sig, None, None)
+            .evaluate(
+                &HookKind::BeforeTool,
+                Some("Bash"),
+                &payload,
+                &sig,
+                None,
+                None,
+            )
             .unwrap();
         assert!(!decision.allowed, "rm -rf / should be denied");
     }
@@ -340,7 +363,14 @@ mod tests {
         let mut sig = SignatureContext::default();
         sig.severity = crate::signature::Severity::Critical;
         let decision = rt
-            .evaluate(&HookKind::BeforeTool, Some("Bash"), &payload, &sig, None, None)
+            .evaluate(
+                &HookKind::BeforeTool,
+                Some("Bash"),
+                &payload,
+                &sig,
+                None,
+                None,
+            )
             .unwrap();
         assert!(!decision.allowed, "critical YARA severity should deny");
     }

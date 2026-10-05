@@ -1,4 +1,7 @@
 program = "sed"
+operands = "write"
+effects_require_flag = "in-place"
+script_operand = true
 # BSD and GNU spellings combined. -i is not a value option: BSD requires a
 # separate suffix (`-i ''`, harmless as a positional), GNU takes it attached.
 # -l is BSD's line-buffered flag (GNU's -l takes a number).

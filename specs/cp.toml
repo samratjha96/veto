@@ -1,4 +1,5 @@
 program = "cp"
+destination = "write"
 # BSD and GNU spellings combined. -S is BSD's flag (GNU's -S takes a value; use --suffix).
 short = { R = "recursive", r = "recursive", a = "archive", c = "clone", f = "force", i = "interactive", l = "link", N = "no-preserve-flags", n = "no-clobber", p = "preserve", S = "no-sparse", s = "symbolic-link", v = "verbose", X = "no-xattrs", x = "one-file-system", H = "follow-cmdline-symlinks", L = "dereference", P = "no-dereference", t = "target-directory", T = "no-target-directory", u = "update", b = "backup" }
 value_options = ["-t", "--target-directory", "--suffix", "--sparse", "--no-preserve"]

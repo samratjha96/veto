@@ -7,6 +7,7 @@
 //! match what runs instead of how it was spelled.
 
 use crate::command_spec;
+use crate::effects::{Effect, EffectKind};
 use brush_parser::ast::{
     AndOr, AndOrList, AssignmentName, AssignmentValue, Command, CommandPrefixOrSuffixItem,
     CompoundCommand, CompoundList, IoFileRedirectKind, IoFileRedirectTarget, IoRedirect, Pipeline,
@@ -37,10 +38,19 @@ pub struct Invocation {
     /// What signature rules should read: the command without arguments that are
     /// only data to it, so `echo "rm -rf /"` is not a destructive command.
     pub scan_text: String,
+    /// Files the command writes or deletes, including redirect targets.
+    pub effects: Vec<Effect>,
+}
+
+/// A redirection on a simple command.
+struct Redirect {
+    text: String,
+    /// The file it truncates or appends to.
+    writes: Option<String>,
 }
 
 impl Invocation {
-    fn new(argv: &[String], redirects: &[String]) -> Self {
+    fn new(argv: &[String], redirects: &[Redirect]) -> Self {
         let mut argv = argv.to_vec();
         argv[0] = basename(&argv[0]).to_string();
         let facts = command_spec::describe(&argv);
@@ -52,15 +62,23 @@ impl Invocation {
             .map(|(_, a)| a.as_str())
             .collect::<Vec<_>>()
             .join(" ");
+        let mut effects = facts.effects;
         for redirect in redirects {
             text.push(' ');
-            text.push_str(redirect);
+            text.push_str(&redirect.text);
             scan_text.push(' ');
-            scan_text.push_str(redirect);
+            scan_text.push_str(&redirect.text);
+            if let Some(path) = &redirect.writes {
+                effects.push(Effect {
+                    kind: EffectKind::Write,
+                    path: path.clone(),
+                });
+            }
         }
         Self {
             text,
             scan_text,
+            effects,
             program: if facts.program.is_empty() {
                 argv[0].clone()
             } else {
@@ -76,6 +94,7 @@ impl Invocation {
         Self {
             text: text.to_string(),
             scan_text: text.to_string(),
+            effects: Vec::new(),
             program: String::new(),
             subcommand: String::new(),
             flags: Vec::new(),
@@ -263,7 +282,7 @@ impl Walker {
         }
         argv[0] = basename(&argv[0]).to_string();
 
-        let redirect_text: Vec<String> = redirects
+        let redirect_text: Vec<Redirect> = redirects
             .iter()
             .filter_map(|r| self.redirect(r, depth))
             .collect();
@@ -322,7 +341,7 @@ impl Walker {
         }
     }
 
-    fn redirect(&mut self, redirect: &IoRedirect, depth: usize) -> Option<String> {
+    fn redirect(&mut self, redirect: &IoRedirect, depth: usize) -> Option<Redirect> {
         match redirect {
             IoRedirect::File(_, kind, IoFileRedirectTarget::Filename(word)) => {
                 let op = match kind {
@@ -334,7 +353,18 @@ impl Walker {
                     IoFileRedirectKind::DuplicateOutput => ">&",
                 };
                 let target = self.expand(&word.value, depth).fields.join(" ");
-                Some(format!("{op} {target}"))
+                let writes = matches!(
+                    kind,
+                    IoFileRedirectKind::Write
+                        | IoFileRedirectKind::Clobber
+                        | IoFileRedirectKind::Append
+                        | IoFileRedirectKind::ReadAndWrite
+                )
+                .then(|| target.clone());
+                Some(Redirect {
+                    text: format!("{op} {target}"),
+                    writes,
+                })
             }
             IoRedirect::File(_, _, IoFileRedirectTarget::ProcessSubstitution(_, sub)) => {
                 self.list(&sub.list, depth + 1);
@@ -342,7 +372,10 @@ impl Walker {
             }
             IoRedirect::HereString(_, word) => {
                 let text = self.expand(&word.value, depth).fields.join(" ");
-                Some(format!("<<< {text}"))
+                Some(Redirect {
+                    text: format!("<<< {text}"),
+                    writes: None,
+                })
             }
             _ => None,
         }

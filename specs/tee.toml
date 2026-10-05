@@ -1,4 +1,5 @@
 program = "tee"
+operands = "write"
 # macOS options; GNU long spellings are their own names.
 short = { a = "append", i = "ignore-interrupts" }
 

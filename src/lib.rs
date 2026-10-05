@@ -6,6 +6,7 @@ pub mod cedar_runtime;
 pub mod command_spec;
 pub mod config;
 pub mod doctor;
+pub mod effects;
 pub mod explain;
 pub mod hook;
 pub mod ipc;

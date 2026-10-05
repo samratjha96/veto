@@ -1,4 +1,5 @@
 program = "rm"
+operands = "delete"
 # BSD and GNU spellings combined.
 short = { r = "recursive", R = "recursive", f = "force", i = "interactive", v = "verbose", d = "dir", P = "overwrite", W = "undelete", I = "interactive-once" }
 

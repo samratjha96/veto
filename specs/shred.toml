@@ -1,0 +1,2 @@
+program = "shred"
+operands = "write"

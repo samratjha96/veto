@@ -1,4 +1,6 @@
 program = "mv"
+sources = "delete"
+destination = "write"
 # BSD and GNU spellings combined.
 short = { f = "force", i = "interactive", n = "no-clobber", v = "verbose", h = "no-dereference", t = "target-directory", T = "no-target-directory", u = "update", b = "backup", S = "suffix" }
 value_options = ["-t", "--target-directory", "-S", "--suffix"]
