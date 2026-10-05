@@ -157,6 +157,22 @@ rule destructive_filesystem_disk {
         any of them
 }
 
+rule destructive_sql {
+    meta:
+        description = "Destructive SQL and Redis commands"
+        severity = "high"
+        category = "destructive_ops"
+
+    strings:
+        $drop = /\bdrop\s+(database|schema|table)\b/ nocase
+        $truncate = /\btruncate\s+table\b/ nocase
+        $dropdb = /\bdropdb\s/ nocase
+        $flush = /\bflush(all|db)\b/ nocase
+
+    condition:
+        any of them
+}
+
 rule destructive_system_power {
     meta:
         description = "System halt / poweroff"

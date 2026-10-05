@@ -3,6 +3,13 @@ program = "chmod"
 # indistinguishable from an option cluster and is reported as flag "x".
 short = { R = "recursive", H = "follow-cmdline-symlinks", L = "dereference", P = "no-dereference", f = "silent", h = "no-dereference", v = "verbose", c = "changes", N = "remove-acl" }
 value_options = ["--reference"]
+# Numeric modes are operands, so the permissive ones are reported as flags.
+prefix_flags = { "777" = "mode-777", "666" = "mode-666" }
+
+[[examples]]
+command = "chmod -R 777 /srv"
+subcommand = ""
+flags = ["mode-777", "recursive"]
 
 [[examples]]
 command = "chmod -R 755 dir"

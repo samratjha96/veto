@@ -85,8 +85,8 @@ fn read_example_policies(policy_dir: &Path) -> Result<String> {
     paths.sort();
 
     for path in paths {
-        let content = std::fs::read_to_string(&path)
-            .with_context(|| format!("read {}", path.display()))?;
+        let content =
+            std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
         let file_name = path.file_name().unwrap_or_default().to_string_lossy();
         examples.push_str(&format!("### {file_name}\n\n```cedar\n{content}\n```\n\n"));
     }
@@ -98,7 +98,13 @@ fn derive_policy_id(nl: &str) -> String {
     let id: String = nl
         .to_lowercase()
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == ' ' { c } else { ' ' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == ' ' {
+                c
+            } else {
+                ' '
+            }
+        })
         .collect::<String>()
         .split_whitespace()
         .collect::<Vec<_>>()
@@ -115,9 +121,8 @@ pub async fn generate(
     natural_language: &str,
 ) -> Result<GeneratedPolicy> {
     let system_prompt = build_system_prompt(policy_dir)?;
-    let user_prompt = format!(
-        "Generate a Cedar policy for the following requirement:\n\n{natural_language}"
-    );
+    let user_prompt =
+        format!("Generate a Cedar policy for the following requirement:\n\n{natural_language}");
 
     let response = llm.chat(&system_prompt, &user_prompt).await?;
     let cedar_text = llm::extract_cedar_block(&response);
@@ -195,7 +200,7 @@ mod tests {
     #[test]
     fn build_system_prompt_includes_examples() {
         let prompt = build_system_prompt(&test_policy_dir()).unwrap();
-        assert!(prompt.contains("forbid-rm-root"));
+        assert!(prompt.contains("forbid-delete-root"));
         assert!(prompt.contains("forbid-git-force-push"));
     }
 

@@ -5,10 +5,5 @@ forbid (
     action == Action::"ShellCommand",
     resource
 ) when {
-    context.command like "kill *" ||
-    context.command like "* kill *" ||
-    context.command like "pkill *" ||
-    context.command like "* pkill *" ||
-    context.command like "killall *" ||
-    context.command like "* killall *"
+    ["kill", "pkill", "killall"].contains(context.program)
 };

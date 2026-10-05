@@ -41,9 +41,10 @@ value_options = ["-s", "-t", "--signal", "--timeout"]
 short = { s = "signal" }
 value_options = ["-s", "--signal"]
 
-# `docker system prune` and `docker system df` share this level; the nested
-# subcommand name is a positional, so flags are the union over all of them.
+# Only the nested subcommands policies need are described.
 [subcommands.system]
+
+[subcommands.system.subcommands.prune]
 short = { a = "all", f = "force" }
 value_options = ["--filter"]
 
@@ -57,8 +58,13 @@ value_options = ["--filter"]
 short = { a = "all", f = "force" }
 value_options = ["--filter", "--platform"]
 
-# Covers rm and prune.
 [subcommands.volume]
+
+[subcommands.volume.subcommands.rm]
+aliases = ["remove"]
+short = { f = "force" }
+
+[subcommands.volume.subcommands.prune]
 short = { a = "all", f = "force" }
 value_options = ["--filter"]
 
@@ -88,9 +94,14 @@ subcommand = "rm"
 flags = ["force", "volumes"]
 
 [[examples]]
-command = "docker system prune -af --volumes"
-subcommand = "system"
-flags = ["all", "force", "volumes"]
+command = "docker system prune -af"
+subcommand = "system prune"
+flags = ["all", "force"]
+
+[[examples]]
+command = "docker volume remove -f v1"
+subcommand = "volume rm"
+flags = ["force"]
 
 [[examples]]
 command = "docker rmi -f img"
