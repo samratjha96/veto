@@ -15,6 +15,7 @@ path = "src/bin/cli.rs"
 
 [dependencies]
 anyhow = "1"
+brush-parser = "0.4"
 cedar-policy = "4"
 clap = { version = "4", features = ["derive", "env"] }
 dirs = "6"

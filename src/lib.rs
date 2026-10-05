@@ -14,5 +14,6 @@ pub mod process_context;
 pub mod signature;
 pub mod server;
 pub mod setup;
+pub mod shell;
 pub mod templates;
 pub mod watcher;
