@@ -1,0 +1,58 @@
+program = "terraform"
+single_dash_long = true
+# From memory (terraform is not installed). `-chdir=DIR` is the only pre-subcommand
+# option and always uses `=`, so it needs no global_value_options entry.
+
+# Not expressible:
+#  - state rm, state mv, state push: `state` is the subcommand, the action is a positional.
+
+[subcommands.apply]
+value_options = ["-var", "--var", "-var-file", "--var-file", "-target", "--target", "-replace", "--replace", "-parallelism", "--parallelism", "-lock-timeout", "--lock-timeout", "-state", "--state"]
+
+[subcommands.destroy]
+value_options = ["-var", "--var", "-var-file", "--var-file", "-target", "--target", "-parallelism", "--parallelism", "-lock-timeout", "--lock-timeout", "-state", "--state"]
+
+[subcommands.plan]
+value_options = ["-var", "--var", "-var-file", "--var-file", "-target", "--target", "-replace", "--replace", "-out", "--out", "-parallelism", "--parallelism", "-lock-timeout", "--lock-timeout", "-state", "--state"]
+
+[subcommands.state]
+value_options = ["-state", "--state", "-state-out", "--state-out", "-backup", "--backup", "-lock-timeout", "--lock-timeout"]
+
+[subcommands.import]
+value_options = ["-var", "--var", "-var-file", "--var-file", "-config", "--config", "-state", "--state", "-lock-timeout", "--lock-timeout"]
+
+[[examples]]
+command = "terraform apply"
+subcommand = "apply"
+flags = []
+
+[[examples]]
+command = "terraform destroy --auto-approve"
+subcommand = "destroy"
+flags = ["auto-approve"]
+
+[[examples]]
+command = "terraform -chdir=infra plan --destroy"
+subcommand = "plan"
+flags = ["destroy"]
+
+[[examples]]
+command = "terraform plan --out plan.tfplan"
+subcommand = "plan"
+flags = ["out"]
+
+# `rm` is a positional, so this is indistinguishable from `state list`.
+[[examples]]
+command = "terraform state rm aws_instance.x"
+subcommand = "state"
+flags = []
+
+[[examples]]
+command = "terraform import aws_instance.x i-123"
+subcommand = "import"
+flags = []
+
+[[examples]]
+command = "terraform apply -auto-approve -target=aws_instance.x"
+subcommand = "apply"
+flags = ["auto-approve", "target"]

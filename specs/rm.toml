@@ -1,0 +1,23 @@
+program = "rm"
+# BSD and GNU spellings combined.
+short = { r = "recursive", R = "recursive", f = "force", i = "interactive", v = "verbose", d = "dir", P = "overwrite", W = "undelete", I = "interactive-once" }
+
+[[examples]]
+command = "rm -rf /"
+subcommand = ""
+flags = ["force", "recursive"]
+
+[[examples]]
+command = "rm -R -f /"
+subcommand = ""
+flags = ["force", "recursive"]
+
+[[examples]]
+command = "rm --recursive --force /"
+subcommand = ""
+flags = ["force", "recursive"]
+
+[[examples]]
+command = "rm build/output.o"
+subcommand = ""
+flags = []

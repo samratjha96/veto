@@ -1,0 +1,24 @@
+program = "kill"
+# Signals spelled `-9` or `-KILL` are not mapped: each character becomes its own flag.
+short = { s = "signal", l = "list" }
+value_options = ["-s"]
+
+[[examples]]
+command = "kill 123"
+subcommand = ""
+flags = []
+
+[[examples]]
+command = "kill -9 123"
+subcommand = ""
+flags = ["9"]
+
+[[examples]]
+command = "kill -s KILL 123"
+subcommand = ""
+flags = ["signal"]
+
+[[examples]]
+command = "kill -l"
+subcommand = ""
+flags = ["list"]

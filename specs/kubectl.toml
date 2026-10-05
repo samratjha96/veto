@@ -1,0 +1,91 @@
+program = "kubectl"
+global_value_options = [
+  "-n", "--namespace", "-s", "--server", "-v", "--v", "--context", "--cluster", "--kubeconfig", "--kuberc", "--user",
+  "--username", "--password", "--token", "--as", "--as-group", "--as-uid", "--cache-dir", "--certificate-authority",
+  "--client-certificate", "--client-key", "--log-flush-frequency", "--profile", "--profile-output",
+  "--request-timeout", "--tls-server-name", "--vmodule",
+]
+
+# `--dry-run` and `--cascade` accept a value only as `--dry-run=server`, so they are not value options.
+
+[subcommands.delete]
+short = { A = "all-namespaces", f = "filename", i = "interactive", k = "kustomize", l = "selector", n = "namespace", o = "output", R = "recursive" }
+value_options = ["-f", "-k", "-l", "-n", "-o", "--filename", "--kustomize", "--selector", "--namespace", "--output", "--field-selector", "--grace-period", "--timeout", "--raw"]
+
+[subcommands.apply]
+short = { f = "filename", k = "kustomize", l = "selector", n = "namespace", o = "output", R = "recursive" }
+value_options = ["-f", "-k", "-l", "-n", "-o", "--filename", "--kustomize", "--selector", "--namespace", "--output", "--field-manager", "--grace-period", "--timeout", "--prune-allowlist", "--subresource", "--validate"]
+
+[subcommands.replace]
+short = { f = "filename", k = "kustomize", n = "namespace", o = "output", R = "recursive" }
+value_options = ["-f", "-k", "-n", "-o", "--filename", "--kustomize", "--namespace", "--output", "--field-manager", "--grace-period", "--timeout", "--raw", "--subresource", "--validate"]
+
+[subcommands.patch]
+short = { f = "filename", k = "kustomize", n = "namespace", o = "output", p = "patch", R = "recursive" }
+value_options = ["-f", "-k", "-n", "-o", "-p", "--filename", "--kustomize", "--namespace", "--output", "--patch", "--patch-file", "--type", "--field-manager", "--subresource"]
+
+[subcommands.scale]
+short = { f = "filename", k = "kustomize", l = "selector", n = "namespace", o = "output", R = "recursive" }
+value_options = ["-f", "-k", "-l", "-n", "-o", "--filename", "--kustomize", "--selector", "--namespace", "--output", "--replicas", "--current-replicas", "--resource-version", "--timeout"]
+
+[subcommands.drain]
+short = { l = "selector", n = "namespace" }
+value_options = ["-l", "-n", "--selector", "--namespace", "--pod-selector", "--chunk-size", "--grace-period", "--skip-wait-for-delete-timeout", "--timeout"]
+
+[subcommands.cordon]
+short = { l = "selector", n = "namespace" }
+value_options = ["-l", "-n", "--selector", "--namespace"]
+
+[subcommands.uncordon]
+short = { l = "selector", n = "namespace" }
+value_options = ["-l", "-n", "--selector", "--namespace"]
+
+# Arguments after `--` are the remote command and are ignored.
+[subcommands.exec]
+short = { c = "container", f = "filename", i = "stdin", n = "namespace", q = "quiet", t = "tty" }
+value_options = ["-c", "-f", "-n", "--container", "--filename", "--namespace", "--pod-running-timeout"]
+
+# Covers restart, undo, status, pause, resume, history: the nested subcommand is a positional.
+[subcommands.rollout]
+short = { f = "filename", k = "kustomize", n = "namespace", o = "output", R = "recursive", w = "watch" }
+value_options = ["-f", "-k", "-n", "-o", "--filename", "--kustomize", "--namespace", "--output", "--revision", "--to-revision", "--timeout"]
+
+[[examples]]
+command = "kubectl delete pod web -n prod --force --grace-period=0"
+subcommand = "delete"
+flags = ["force", "grace-period", "namespace"]
+
+[[examples]]
+command = "kubectl --context prod -n kube-system delete -f app.yaml --all"
+subcommand = "delete"
+flags = ["all", "filename"]
+
+[[examples]]
+command = "kubectl drain node1 --ignore-daemonsets --delete-emptydir-data --force"
+subcommand = "drain"
+flags = ["delete-emptydir-data", "force", "ignore-daemonsets"]
+
+[[examples]]
+command = "kubectl exec -it web -- rm -rf /"
+subcommand = "exec"
+flags = ["stdin", "tty"]
+
+[[examples]]
+command = "kubectl rollout restart deployment/web -n prod"
+subcommand = "rollout"
+flags = ["namespace"]
+
+[[examples]]
+command = "kubectl apply -f x.yaml --server-side --force-conflicts"
+subcommand = "apply"
+flags = ["filename", "force-conflicts", "server-side"]
+
+[[examples]]
+command = "kubectl scale --replicas 0 deploy/web"
+subcommand = "scale"
+flags = ["replicas"]
+
+[[examples]]
+command = "kubectl get pods"
+subcommand = "get"
+flags = []

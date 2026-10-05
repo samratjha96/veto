@@ -1,0 +1,34 @@
+program = "mv"
+# BSD and GNU spellings combined.
+short = { f = "force", i = "interactive", n = "no-clobber", v = "verbose", h = "no-dereference", t = "target-directory", T = "no-target-directory", u = "update", b = "backup", S = "suffix" }
+value_options = ["-t", "--target-directory", "-S", "--suffix"]
+
+[[examples]]
+command = "mv -f a b"
+subcommand = ""
+flags = ["force"]
+
+[[examples]]
+command = "mv -fi a b"
+subcommand = ""
+flags = ["force", "interactive"]
+
+[[examples]]
+command = "mv -t dir -n a b"
+subcommand = ""
+flags = ["no-clobber", "target-directory"]
+
+[[examples]]
+command = "mv --force a b"
+subcommand = ""
+flags = ["force"]
+
+[[examples]]
+command = "mv -S .bak -b a b"
+subcommand = ""
+flags = ["backup", "suffix"]
+
+[[examples]]
+command = "mv a b"
+subcommand = ""
+flags = []

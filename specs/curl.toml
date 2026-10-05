@@ -1,0 +1,52 @@
+program = "curl"
+# Short options map to their long names. Attached values (`-ofile`, `-d@f`,
+# `-XPOST`) are not understood; use the separated form.
+short = { a = "append", E = "cert", K = "config", C = "continue-at", b = "cookie", c = "cookie-jar", d = "data", q = "disable", D = "dump-header", f = "fail", F = "form", P = "ftp-port", G = "get", g = "globoff", I = "head", H = "header", h = "help", "0" = "http1.0", i = "include", k = "insecure", "4" = "ipv4", "6" = "ipv6", j = "junk-session-cookies", l = "list-only", L = "location", M = "manual", m = "max-time", n = "netrc", ":" = "next", N = "no-buffer", o = "output", Z = "parallel", "#" = "progress-bar", x = "proxy", U = "proxy-user", p = "proxytunnel", Q = "quote", r = "range", e = "referer", J = "remote-header-name", O = "remote-name", R = "remote-time", X = "request", S = "show-error", s = "silent", Y = "speed-limit", y = "speed-time", "2" = "sslv2", "3" = "sslv3", t = "telnet-option", z = "time-cond", "1" = "tlsv1", T = "upload-file", B = "use-ascii", u = "user", A = "user-agent", v = "verbose", V = "version", w = "write-out" }
+value_options = [
+  # short
+  "-E", "-K", "-C", "-b", "-c", "-d", "-D", "-F", "-P", "-H", "-m", "-o", "-x", "-U", "-Q", "-r", "-e", "-X", "-Y", "-y", "-t", "-z", "-T", "-u", "-A", "-w",
+  # long
+  "--abstract-unix-socket", "--alt-svc", "--aws-sigv4", "--cacert", "--capath", "--cert", "--cert-type", "--ciphers", "--config", "--connect-timeout", "--connect-to", "--continue-at", "--cookie", "--cookie-jar", "--create-file-mode", "--crlfile", "--curves", "--data", "--data-ascii", "--data-binary", "--data-raw", "--data-urlencode", "--delegation", "--dns-interface", "--dns-ipv4-addr", "--dns-ipv6-addr", "--dns-servers", "--doh-url", "--dump-header", "--egd-file", "--engine", "--etag-compare", "--etag-save", "--expect100-timeout", "--form", "--form-string", "--ftp-account", "--ftp-alternative-to-user", "--ftp-method", "--ftp-port", "--ftp-ssl-ccc-mode", "--happy-eyeballs-timeout-ms", "--haproxy-clientip", "--header", "--hostpubmd5", "--hostpubsha256", "--hsts", "--interface", "--ipfs-gateway", "--json", "--keepalive-time", "--key", "--key-type", "--krb", "--libcurl", "--limit-rate", "--local-port", "--login-options", "--mail-auth", "--mail-from", "--mail-rcpt", "--max-filesize", "--max-redirs", "--max-time", "--netrc-file", "--noproxy", "--oauth2-bearer", "--output", "--output-dir", "--parallel-max", "--pass", "--pinnedpubkey", "--preproxy", "--proto", "--proto-default", "--proto-redir", "--proxy", "--proxy-cacert", "--proxy-capath", "--proxy-cert", "--proxy-cert-type", "--proxy-ciphers", "--proxy-crlfile", "--proxy-header", "--proxy-key", "--proxy-key-type", "--proxy-pass", "--proxy-pinnedpubkey", "--proxy-service-name", "--proxy-tls13-ciphers", "--proxy-tlsauthtype", "--proxy-tlspassword", "--proxy-tlsuser", "--proxy-user", "--proxy1.0", "--pubkey", "--quote", "--random-file", "--range", "--rate", "--referer", "--request", "--request-target", "--resolve", "--retry", "--retry-delay", "--retry-max-time", "--sasl-authzid", "--service-name", "--socks4", "--socks4a", "--socks5", "--socks5-gssapi-service", "--socks5-hostname", "--speed-limit", "--speed-time", "--stderr", "--telnet-option", "--tftp-blksize", "--time-cond", "--tls-max", "--tls13-ciphers", "--tlsauthtype", "--tlspassword", "--tlsuser", "--trace", "--trace-ascii", "--trace-config", "--unix-socket", "--upload-file", "--url", "--url-query", "--user", "--user-agent", "--variable", "--write-out",
+]
+
+[[examples]]
+command = "curl -sSL https://example.com"
+subcommand = ""
+flags = ["location", "show-error", "silent"]
+
+[[examples]]
+command = "curl -o out.bin -L https://example.com"
+subcommand = ""
+flags = ["location", "output"]
+
+[[examples]]
+command = "curl -X POST -d @body.json -H Content-Type:json https://example.com"
+subcommand = ""
+flags = ["data", "header", "request"]
+
+[[examples]]
+command = "curl --output=out --fail https://example.com"
+subcommand = ""
+flags = ["fail", "output"]
+
+[[examples]]
+command = "curl -O https://example.com/f.tgz"
+subcommand = ""
+flags = ["remote-name"]
+
+[[examples]]
+command = "curl -T file.bin ftp://example.com/"
+subcommand = ""
+flags = ["upload-file"]
+
+# A value option at the end of a cluster does not consume the next argument,
+# so `file` is read as a positional. Flags are still right.
+[[examples]]
+command = "curl -sSo file https://example.com"
+subcommand = ""
+flags = ["output", "show-error", "silent"]
+
+[[examples]]
+command = "curl -sSofile.txt https://example.com"
+subcommand = ""
+flags = ["output", "show-error", "silent"]

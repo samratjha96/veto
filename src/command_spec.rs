@@ -18,26 +18,45 @@ pub struct Facts {
 }
 
 /// One tool's spec file in `specs/`.
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 struct Tool {
     program: String,
+    /// Other names the same tool is invoked by, e.g. `pip3` for `pip`.
+    #[serde(default)]
+    aliases: Vec<String>,
     /// Options given before the subcommand that consume the next argument.
     #[serde(default)]
     global_value_options: Vec<String>,
+    /// Arguments before the subcommand with these prefixes are not the subcommand
+    /// (`cargo +nightly run`).
+    #[serde(default)]
+    skipped_prefixes: Vec<String>,
+    /// Multi-character options use a single dash (`find -delete`, `terraform
+    /// -auto-approve`), so `-abc` is the option `abc`, not the cluster `-a -b -c`.
+    #[serde(default)]
+    single_dash_long: bool,
+    /// Empty for tools without subcommands, whose options sit at the top level.
     #[serde(default)]
     subcommands: HashMap<String, Subcommand>,
+    #[serde(flatten)]
+    options: Subcommand,
     /// Checked by the `spec_examples_hold` test; not used at run time.
     #[serde(default)]
     #[cfg_attr(not(test), allow(dead_code))]
     examples: Vec<Example>,
 }
 
-#[derive(Deserialize, Default)]
+#[derive(Deserialize, Default, Clone)]
 struct Subcommand {
+    /// Other spellings of the subcommand, e.g. `i` for `npm install`.
+    #[serde(default)]
+    aliases: Vec<String>,
     /// Short options and their canonical flag name. Long options are their own name.
     #[serde(default)]
     short: HashMap<char, String>,
-    /// Options that consume the next argument, so it is not mistaken for a positional.
+    /// Options that consume a value, spelled as they appear (`-o`, `--output`), so the
+    /// value is not mistaken for a positional. A short option takes the rest of its
+    /// cluster as the value (`-ofile`) before taking the next argument.
     #[serde(default)]
     value_options: Vec<String>,
     /// A positional argument starting with the prefix implies the flag.
@@ -45,7 +64,7 @@ struct Subcommand {
     prefix_flags: HashMap<String, String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 #[cfg_attr(not(test), allow(dead_code))]
 struct Example {
     command: String,
@@ -56,16 +75,20 @@ struct Example {
 static SPEC_FILES: Dir = include_dir!("$CARGO_MANIFEST_DIR/specs");
 
 static TOOLS: LazyLock<HashMap<String, Tool>> = LazyLock::new(|| {
-    SPEC_FILES
+    let mut tools = HashMap::new();
+    for file in SPEC_FILES
         .files()
         .filter(|f| f.path().extension().is_some_and(|e| e == "toml"))
-        .map(|f| {
-            let text = f.contents_utf8().expect("spec is UTF-8");
-            let tool: Tool = toml::from_str(text)
-                .unwrap_or_else(|e| panic!("invalid spec {}: {e}", f.path().display()));
-            (tool.program.clone(), tool)
-        })
-        .collect()
+    {
+        let text = file.contents_utf8().expect("spec is UTF-8");
+        let tool: Tool = toml::from_str(text)
+            .unwrap_or_else(|e| panic!("invalid spec {}: {e}", file.path().display()));
+        for alias in &tool.aliases {
+            tools.insert(alias.clone(), tool.clone());
+        }
+        tools.insert(tool.program.clone(), tool);
+    }
+    tools
 });
 
 pub fn describe(argv: &[String]) -> Facts {
@@ -74,22 +97,36 @@ pub fn describe(argv: &[String]) -> Facts {
     };
 
     let mut args = argv[1..].iter();
-    let mut subcommand = None;
-    while let Some(arg) = args.next() {
-        if !arg.starts_with('-') {
-            subcommand = Some(arg);
-            break;
+    let (subcommand, spec) = if tool.subcommands.is_empty() {
+        (String::new(), Some(&tool.options))
+    } else {
+        let mut word = None;
+        while let Some(arg) = args.next() {
+            if tool.skipped_prefixes.iter().any(|p| arg.starts_with(p.as_str())) {
+                continue;
+            }
+            if !arg.starts_with('-') {
+                word = Some(arg);
+                break;
+            }
+            if tool.global_value_options.contains(arg) {
+                args.next();
+            }
         }
-        if tool.global_value_options.contains(arg) {
-            args.next();
+        let Some(word) = word else {
+            return Facts::default();
+        };
+        match tool
+            .subcommands
+            .iter()
+            .find(|(name, s)| *name == word || s.aliases.contains(word))
+        {
+            Some((name, spec)) => (name.clone(), Some(spec)),
+            None => (word.clone(), None),
         }
-    }
-    let Some(subcommand) = subcommand else {
-        return Facts::default();
     };
 
-    let spec = tool.subcommands.get(subcommand);
-    let takes_value = |arg: &String| spec.is_some_and(|s| s.value_options.contains(arg));
+    let takes_value = |option: &str| spec.is_some_and(|s| s.value_options.iter().any(|o| o == option));
     let mut flags = Vec::new();
     let mut options_ended = false;
     while let Some(arg) = args.next() {
@@ -101,7 +138,8 @@ pub fn describe(argv: &[String]) -> Facts {
             }
         } else if arg == "--" {
             options_ended = true;
-        } else if let Some(long) = arg.strip_prefix("--") {
+        } else if arg.starts_with("--") || (tool.single_dash_long && arg.len() > 2) {
+            let long = arg.trim_start_matches('-');
             let (name, has_value) = match long.split_once('=') {
                 Some((name, _)) => (name, true),
                 None => (long, false),
@@ -111,24 +149,25 @@ pub fn describe(argv: &[String]) -> Facts {
                 args.next();
             }
         } else {
-            for c in arg[1..].chars() {
+            let cluster = &arg[1..];
+            for (i, c) in cluster.char_indices() {
                 let name = spec
                     .and_then(|s| s.short.get(&c))
                     .map_or_else(|| c.to_string(), Clone::clone);
                 flags.push(name);
-            }
-            if takes_value(arg) {
-                args.next();
+                if takes_value(&format!("-{c}")) {
+                    if i + c.len_utf8() == cluster.len() {
+                        args.next();
+                    }
+                    break;
+                }
             }
         }
     }
     flags.sort();
     flags.dedup();
 
-    Facts {
-        subcommand: subcommand.clone(),
-        flags,
-    }
+    Facts { subcommand, flags }
 }
 
 #[cfg(test)]
@@ -142,15 +181,25 @@ mod tests {
     #[test]
     fn spec_examples_hold() {
         let mut checked = 0;
+        let mut failures = Vec::new();
         for tool in TOOLS.values() {
             for example in &tool.examples {
                 let facts = describe(&example.command);
-                assert_eq!(facts.subcommand, example.subcommand, "{}", example.command);
-                assert_eq!(facts.flags, example.flags, "{}", example.command);
+                if (&facts.subcommand, &facts.flags) != (&example.subcommand, &example.flags) {
+                    failures.push(format!(
+                        "{}: got {:?} {:?}, expected {:?} {:?}",
+                        example.command,
+                        facts.subcommand,
+                        facts.flags,
+                        example.subcommand,
+                        example.flags
+                    ));
+                }
                 checked += 1;
             }
         }
         assert!(checked > 0, "no spec examples found");
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 
     #[test]

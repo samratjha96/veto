@@ -1,0 +1,36 @@
+program = "sed"
+# BSD and GNU spellings combined. -i is not a value option: BSD requires a
+# separate suffix (`-i ''`, harmless as a positional), GNU takes it attached.
+# -l is BSD's line-buffered flag (GNU's -l takes a number).
+short = { E = "regexp-extended", r = "regexp-extended", e = "expression", f = "file", i = "in-place", I = "in-place", n = "quiet", s = "separate", z = "null-data", u = "unbuffered", l = "line-buffered" }
+value_options = ["-e", "-f", "--expression", "--file", "--line-length"]
+
+[[examples]]
+command = "sed -i .bak s/a/b/ file"
+subcommand = ""
+flags = ["in-place"]
+
+[[examples]]
+command = "sed -n -e p file"
+subcommand = ""
+flags = ["expression", "quiet"]
+
+[[examples]]
+command = "sed -ri s/a/b/ f"
+subcommand = ""
+flags = ["in-place", "regexp-extended"]
+
+[[examples]]
+command = "sed --in-place=.bak s/a/b/ f"
+subcommand = ""
+flags = ["in-place"]
+
+[[examples]]
+command = "sed -f script.sed input"
+subcommand = ""
+flags = ["file"]
+
+[[examples]]
+command = "sed s/a/b/ f"
+subcommand = ""
+flags = []

@@ -1,0 +1,19 @@
+program = "truncate"
+# macOS options. `-s` takes the size as the next argument; `-s0` is not split.
+short = { c = "no-create", r = "reference", s = "size" }
+value_options = ["-r", "-s"]
+
+[[examples]]
+command = "truncate -s 0 app.log"
+subcommand = ""
+flags = ["size"]
+
+[[examples]]
+command = "truncate -c -s +10M app.log"
+subcommand = ""
+flags = ["no-create", "size"]
+
+[[examples]]
+command = "truncate -r ref.bin copy.bin"
+subcommand = ""
+flags = ["reference"]

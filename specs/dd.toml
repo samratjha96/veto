@@ -1,0 +1,29 @@
+program = "dd"
+# dd takes key=value operands, not options, so only prefix_flags apply.
+# `of=/dev/null` also reports output-device.
+prefix_flags = { "of=" = "output-file", "of=/dev/" = "output-device", "seek=" = "seek", "oseek=" = "seek", "conv=notrunc" = "notrunc" }
+
+[[examples]]
+command = "dd if=/dev/zero of=out.img bs=1M count=10"
+subcommand = ""
+flags = ["output-file"]
+
+[[examples]]
+command = "dd if=img of=/dev/disk2 bs=1m"
+subcommand = ""
+flags = ["output-device", "output-file"]
+
+[[examples]]
+command = "dd if=a of=b conv=notrunc"
+subcommand = ""
+flags = ["notrunc", "output-file"]
+
+[[examples]]
+command = "dd if=a oseek=3 of=b"
+subcommand = ""
+flags = ["output-file", "seek"]
+
+[[examples]]
+command = "dd if=a"
+subcommand = ""
+flags = []

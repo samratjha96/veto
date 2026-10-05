@@ -1,0 +1,29 @@
+program = "chown"
+# BSD and GNU spellings combined.
+short = { R = "recursive", H = "follow-cmdline-symlinks", L = "dereference", P = "no-dereference", f = "silent", h = "no-dereference", n = "numeric", v = "verbose", x = "one-file-system", c = "changes" }
+value_options = ["--reference"]
+
+[[examples]]
+command = "chown -R root:root /x"
+subcommand = ""
+flags = ["recursive"]
+
+[[examples]]
+command = "chown -Rh user f"
+subcommand = ""
+flags = ["no-dereference", "recursive"]
+
+[[examples]]
+command = "chown --recursive --from=a:b user f"
+subcommand = ""
+flags = ["from", "recursive"]
+
+[[examples]]
+command = "chown --reference ref f"
+subcommand = ""
+flags = ["reference"]
+
+[[examples]]
+command = "chown -n 1000 f"
+subcommand = ""
+flags = ["numeric"]

@@ -1,0 +1,108 @@
+program = "docker"
+global_value_options = ["-H", "--host", "-c", "--context", "-l", "--log-level", "--config", "--tlscacert", "--tlscert", "--tlskey"]
+
+# Options after the image name belong to the container command but are still read
+# as docker options (`docker run alpine ls -v` yields "volume").
+[subcommands.run]
+short = { a = "attach", c = "cpu-shares", d = "detach", e = "env", h = "hostname", i = "interactive", l = "label", m = "memory", p = "publish", P = "publish-all", q = "quiet", t = "tty", u = "user", v = "volume", w = "workdir" }
+value_options = [
+  "-a", "-c", "-e", "-h", "-l", "-m", "-p", "-u", "-v", "-w",
+  "--add-host", "--annotation", "--attach", "--blkio-weight", "--blkio-weight-device", "--cap-add", "--cap-drop",
+  "--cgroup-parent", "--cgroupns", "--cidfile", "--cpu-count", "--cpu-percent", "--cpu-period", "--cpu-quota",
+  "--cpu-rt-period", "--cpu-rt-runtime", "--cpu-shares", "--cpus", "--cpuset-cpus", "--cpuset-mems",
+  "--detach-keys", "--device", "--device-cgroup-rule", "--device-read-bps", "--device-read-iops",
+  "--device-write-bps", "--device-write-iops", "--dns", "--dns-option", "--dns-search", "--domainname",
+  "--entrypoint", "--env", "--env-file", "--expose", "--gpus", "--group-add", "--health-cmd", "--health-interval",
+  "--health-retries", "--health-start-interval", "--health-start-period", "--health-timeout", "--hostname",
+  "--io-maxbandwidth", "--io-maxiops", "--ip", "--ip6", "--ipc", "--isolation", "--label", "--label-file",
+  "--link", "--link-local-ip", "--log-driver", "--log-opt", "--mac-address", "--memory", "--memory-reservation",
+  "--memory-swap", "--memory-swappiness", "--mount", "--name", "--network", "--network-alias", "--oom-score-adj",
+  "--pid", "--pids-limit", "--platform", "--publish", "--pull", "--restart", "--runtime", "--security-opt",
+  "--shm-size", "--stop-signal", "--stop-timeout", "--storage-opt", "--sysctl", "--tmpfs", "--ulimit", "--user",
+  "--userns", "--uts", "--volume", "--volume-driver", "--volumes-from", "--workdir",
+]
+
+[subcommands.exec]
+short = { d = "detach", e = "env", i = "interactive", t = "tty", u = "user", w = "workdir" }
+value_options = ["-e", "-u", "-w", "--detach-keys", "--env", "--env-file", "--user", "--workdir"]
+
+[subcommands.rm]
+short = { f = "force", l = "link", v = "volumes" }
+
+[subcommands.rmi]
+short = { f = "force" }
+value_options = ["--platform"]
+
+[subcommands.stop]
+short = { s = "signal", t = "timeout" }
+value_options = ["-s", "-t", "--signal", "--timeout"]
+
+[subcommands.kill]
+short = { s = "signal" }
+value_options = ["-s", "--signal"]
+
+# `docker system prune` and `docker system df` share this level; the nested
+# subcommand name is a positional, so flags are the union over all of them.
+[subcommands.system]
+short = { a = "all", f = "force" }
+value_options = ["--filter"]
+
+# Covers rm and prune. `docker container run/exec/stop/ls` options are not described.
+[subcommands.container]
+short = { a = "all", f = "force", l = "link", v = "volumes" }
+value_options = ["--filter"]
+
+# Covers rm and prune. `docker image ls/save/...` options are not described.
+[subcommands.image]
+short = { a = "all", f = "force" }
+value_options = ["--filter", "--platform"]
+
+# Covers rm and prune.
+[subcommands.volume]
+short = { a = "all", f = "force" }
+value_options = ["--filter"]
+
+# Compose is a plugin: its own options sit after `compose`, and `up`/`down`/`rm`
+# are positionals, so flags are the union over all compose subcommands.
+[subcommands.compose]
+short = { d = "detach", f = "file", p = "project-name", t = "timeout", v = "volumes", V = "renew-anon-volumes", w = "watch", y = "yes" }
+value_options = [
+  "-f", "-p", "-t",
+  "--ansi", "--env-file", "--file", "--parallel", "--profile", "--progress", "--project-directory", "--project-name",
+  "--rmi", "--scale", "--timeout", "--exit-code-from", "--pull", "--wait-timeout", "--attach", "--no-attach",
+]
+
+[[examples]]
+command = "docker run --rm -it -v /:/host --privileged alpine sh"
+subcommand = "run"
+flags = ["interactive", "privileged", "rm", "tty", "volume"]
+
+[[examples]]
+command = "docker run --pid=host -e A=b --name x alpine"
+subcommand = "run"
+flags = ["env", "name", "pid"]
+
+[[examples]]
+command = "docker -H tcp://h:2375 --context prod rm -fv web"
+subcommand = "rm"
+flags = ["force", "volumes"]
+
+[[examples]]
+command = "docker system prune -af --volumes"
+subcommand = "system"
+flags = ["all", "force", "volumes"]
+
+[[examples]]
+command = "docker rmi -f img"
+subcommand = "rmi"
+flags = ["force"]
+
+[[examples]]
+command = "docker compose -f a.yml -p proj down -v --rmi all"
+subcommand = "compose"
+flags = ["file", "project-name", "rmi", "volumes"]
+
+[[examples]]
+command = "docker ps"
+subcommand = "ps"
+flags = []

@@ -1,0 +1,35 @@
+program = "find"
+single_dash_long = true
+# `-f` takes a path on BSD; the primaries that take a value are listed so the value
+# is not mistaken for a positional (`-mtime -1`). `-exec ... ;` has variable arity,
+# so dashed arguments inside it leak as flags.
+short = { H = "follow-cmdline-symlinks", L = "follow-symlinks", P = "no-follow-symlinks", E = "extended-regex" }
+value_options = [
+  # BSD
+  "-f", "-Bmin", "-Bnewer", "-Btime", "-amin", "-anewer", "-atime", "-cmin", "-cnewer", "-ctime", "-flags", "-fstype", "-gid", "-group", "-ilname", "-iname", "-inum", "-ipath", "-iregex", "-iwholename", "-links", "-lname", "-maxdepth", "-mindepth", "-mmin", "-mnewer", "-mtime", "-name", "-newer", "-path", "-perm", "-regex", "-samefile", "-size", "-type", "-uid", "-user", "-wholename", "-xattrname",
+  "-neweraa", "-neweraB", "-newerac", "-neweram", "-newerat", "-newerBa", "-newerBB", "-newerBc", "-newerBm", "-newerBt", "-newerca", "-newercB", "-newercc", "-newercm", "-newerct", "-newerma", "-newermB", "-newermc", "-newermm", "-newermt",
+  # GNU
+  "-D", "-regextype", "-fprint", "-fprint0", "-fls", "-printf", "-used", "-context",
+]
+
+# The value of -mtime starts with a dash; the flags are the letters of "-mtime".
+[[examples]]
+command = "find . -mtime -1"
+subcommand = ""
+flags = ["mtime"]
+
+[[examples]]
+command = "find -E . -regex .*"
+subcommand = ""
+flags = ["extended-regex", "regex"]
+
+[[examples]]
+command = "find -f /tmp -name x"
+subcommand = ""
+flags = ["f", "name"]
+
+# Literal output, not meaning: `-delete` is the letters d, e, l, t.
+[[examples]]
+command = "find . -delete"
+subcommand = ""
+flags = ["delete"]
