@@ -1,4 +1,5 @@
 program = "terraform"
+aliases = ["tofu"]
 single_dash_long = true
 # From memory (terraform is not installed). `-chdir=DIR` is the only pre-subcommand
 # option and always uses `=`, so it needs no global_value_options entry.
@@ -56,3 +57,8 @@ flags = []
 command = "terraform apply -auto-approve -target=aws_instance.x"
 subcommand = "apply"
 flags = ["auto-approve", "target"]
+
+[[examples]]
+command = "tofu apply -destroy"
+subcommand = "apply"
+flags = ["destroy"]

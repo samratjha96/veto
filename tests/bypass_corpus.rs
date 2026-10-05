@@ -91,9 +91,14 @@ const CASES: &[Case] = &[
         true,
     ),
     bash("alt-spelling", "terraform apply -destroy", true),
+    bash("alt-spelling", "tofu destroy", true),
+    bash("alt-spelling", "git -C /repo reset --hard", true),
+    bash("alt-spelling", "git clean -xdf", true),
+    bash("alt-spelling", "git commit -anm wip", true),
+    bash("alt-spelling", "helm del my-release", true),
     bash("alt-spelling", "psql -c \"DrOp DaTaBaSe prod\"", false),
-    bash("alt-spelling", "find ~ -delete", false),
-    bash("alt-spelling", "find / -delete", false),
+    bash("alt-spelling", "find ~ -delete", true),
+    bash("alt-spelling", "find / -delete", true),
     // Quoting and escaping collapse to the real command only inside the shell.
     bash("quote-collapse", "r\"\"m -rf /", true),
     bash("quote-collapse", "r''m -rf /", true),
@@ -218,14 +223,14 @@ fn payload(case: &Case) -> Value {
     }
 }
 
-/// Returns (verdict matches ground truth, verdict kind).
-fn evaluate(case: &Case, cedar: &CedarRuntime) -> (bool, &'static str) {
+/// Returns (verdict matches ground truth, verdict kind and reason).
+fn evaluate(case: &Case, cedar: &CedarRuntime) -> (bool, String) {
     let result = adjudicate::adjudicate(&HookKind::BeforeTool, &payload(case), cedar)
         .unwrap_or_else(|e| panic!("adjudicate {:?}: {e}", case.input));
     let (caught, kind) = match result.verdict {
-        Verdict::Allow => (false, "allow"),
-        Verdict::Ask { .. } => (true, "ask"),
-        Verdict::Deny { .. } => (true, "deny"),
+        Verdict::Allow => (false, "allow".to_string()),
+        Verdict::Ask { reason } => (true, format!("ask ({reason})")),
+        Verdict::Deny { reason } => (true, format!("deny ({reason})")),
     };
     (caught == case.danger, kind)
 }

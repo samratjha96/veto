@@ -7,6 +7,17 @@ short = { f = "force", d = "delete", u = "set-upstream", n = "dry-run", q = "qui
 # `git push origin +main` forces; `git push origin :main` deletes.
 prefix_flags = { "+" = "force", ":" = "delete" }
 
+[subcommands.reset]
+short = { q = "quiet", p = "patch" }
+
+[subcommands.clean]
+short = { f = "force", d = "directories", x = "ignored", X = "only-ignored", n = "dry-run", q = "quiet", i = "interactive", e = "exclude" }
+value_options = ["-e", "--exclude"]
+
+[subcommands.commit]
+short = { n = "no-verify", a = "all", v = "verbose", q = "quiet", s = "signoff", e = "edit", m = "message", F = "file", C = "reuse-message", c = "reedit-message" }
+value_options = ["-m", "--message", "-F", "--file", "-C", "-c", "--author", "--date", "--template", "-t", "--cleanup"]
+
 [[examples]]
 command = "git push --force origin main"
 subcommand = "push"
@@ -42,3 +53,23 @@ flags = ["push-option"]
 command = "git status"
 subcommand = "status"
 flags = []
+
+[[examples]]
+command = "git reset --hard HEAD~1"
+subcommand = "reset"
+flags = ["hard"]
+
+[[examples]]
+command = "git clean -fdx"
+subcommand = "clean"
+flags = ["directories", "force", "ignored"]
+
+[[examples]]
+command = "git commit -anm msg"
+subcommand = "commit"
+flags = ["all", "message", "no-verify"]
+
+[[examples]]
+command = "git commit --no-verify -m msg"
+subcommand = "commit"
+flags = ["message", "no-verify"]

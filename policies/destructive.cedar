@@ -55,6 +55,17 @@ forbid (
     context.command like "*rm*/.git/"
 };
 
+@id("ask-find-delete")
+@description("Confirm before find deletes everything it matches.")
+forbid (
+    principal,
+    action == Action::"ShellCommand",
+    resource
+) when {
+    context.program == "find" &&
+    context.flags.contains("delete")
+};
+
 @id("forbid-shred")
 @description("Block shred commands.")
 forbid (
@@ -122,7 +133,9 @@ forbid (
     action == Action::"ShellCommand",
     resource
 ) when {
-    context.command like "*git reset --hard*"
+    context.program == "git" &&
+    context.subcommand == "reset" &&
+    context.flags.contains("hard")
 };
 
 @id("forbid-git-clean-force")
@@ -132,9 +145,9 @@ forbid (
     action == Action::"ShellCommand",
     resource
 ) when {
-    context.command like "*git clean -f*" ||
-    context.command like "*git clean -df*" ||
-    context.command like "*git clean -xf*"
+    context.program == "git" &&
+    context.subcommand == "clean" &&
+    context.flags.contains("force")
 };
 
 @id("forbid-git-no-verify")
@@ -144,8 +157,9 @@ forbid (
     action == Action::"ShellCommand",
     resource
 ) when {
-    context.command like "*git commit --no-verify*" ||
-    context.command like "*git push --no-verify*"
+    context.program == "git" &&
+    ["commit", "push"].contains(context.subcommand) &&
+    context.flags.contains("no-verify")
 };
 
 @id("forbid-git-filter-branch")
@@ -155,8 +169,8 @@ forbid (
     action == Action::"ShellCommand",
     resource
 ) when {
-    context.command like "*git filter-branch*" ||
-    context.command like "*git filter-repo*"
+    context.program == "git" &&
+    context.subcommand == "filter-branch"
 };
 
 // ═══════════════════════════════════════════════════════
@@ -170,8 +184,9 @@ forbid (
     action == Action::"ShellCommand",
     resource
 ) when {
-    context.command like "*terraform destroy*" ||
-    context.command like "*tofu destroy*"
+    context.program == "terraform" &&
+    (context.subcommand == "destroy" ||
+     (context.subcommand == "apply" && context.flags.contains("destroy")))
 };
 
 @id("forbid-docker-system-prune")
@@ -213,8 +228,8 @@ forbid (
     action == Action::"ShellCommand",
     resource
 ) when {
-    context.command like "*helm uninstall *" ||
-    context.command like "*helm delete *"
+    context.program == "helm" &&
+    context.subcommand == "uninstall"
 };
 
 // ═══════════════════════════════════════════════════════
