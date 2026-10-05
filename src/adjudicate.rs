@@ -30,13 +30,19 @@ pub fn adjudicate(
     // 2. Parse shell commands, then YARA scan. Signatures read what the commands
     // are, not text they merely carry (`echo "rm -rf /"`). Anything the parser could
     // not resolve, and pipes and here-documents, are scanned as written, so
-    // signatures stay the backstop for them.
+    // signatures stay the backstop for them. Pipes and here-documents are scanned
+    // both ways: as written, and as the commands normalize.
     let shell_analysis = (kind.cedar_action(tool_name.as_deref()) == "ShellCommand")
         .then(|| shell::analyze(&scan_text));
     let sig = match &shell_analysis {
-        Some(a) if a.unresolved.is_empty() && !a.scan_raw && !a.commands.is_empty() => {
+        Some(a) if a.unresolved.is_empty() && !a.commands.is_empty() => {
             let commands: Vec<&str> = a.commands.iter().map(|c| c.scan_text.as_str()).collect();
-            signature::scan(&commands.join(" ; "))
+            let normalized = commands.join(" ; ");
+            if a.scan_raw {
+                signature::scan(&format!("{scan_text}\n{normalized}"))
+            } else {
+                signature::scan(&normalized)
+            }
         }
         _ => signature::scan(&scan_text),
     };
