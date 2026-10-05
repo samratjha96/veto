@@ -1,9 +1,10 @@
 //! Core adjudication pipeline: YARA scan → Cedar eval → Verdict.
 
 use crate::adapters::claude::payload;
-use crate::cedar_runtime::CedarRuntime;
+use crate::cedar_runtime::{CedarDecision, CedarRuntime};
 use crate::hook::{HookKind, Verdict};
 use crate::process_context;
+use crate::shell;
 use crate::signature::{self, Severity, SignatureContext};
 use anyhow::Result;
 use serde_json::Value;
@@ -36,14 +37,41 @@ pub fn adjudicate(
         None
     };
 
-    // 4. Cedar evaluation.
-    let cedar_decision = cedar.evaluate(
-        kind,
-        tool_name.as_deref(),
-        hook_payload,
-        &sig,
-        process_ctx,
-    )?;
+    // 4. Cedar evaluation. A shell command is judged as the shell would run it,
+    // one simple command at a time, so quoting and wrappers cannot hide it.
+    let shell_analysis = (kind.cedar_action(tool_name.as_deref()) == "ShellCommand")
+        .then(|| shell::analyze(&scan_text));
+    let cedar_decision = match &shell_analysis {
+        Some(analysis) if !analysis.commands.is_empty() => {
+            let mut combined = CedarDecision {
+                allowed: true,
+                deny_reasons: Vec::new(),
+                policy_id: None,
+            };
+            for command in &analysis.commands {
+                let mut payload = hook_payload.clone();
+                payload["tool_input"]["command"] = Value::String(command.clone());
+                let decision =
+                    cedar.evaluate(kind, tool_name.as_deref(), &payload, &sig, process_ctx)?;
+                combined.allowed &= decision.allowed;
+                for reason in decision.deny_reasons {
+                    if !combined.deny_reasons.contains(&reason) {
+                        combined.deny_reasons.push(reason);
+                    }
+                }
+                combined.policy_id = combined.policy_id.or(decision.policy_id);
+            }
+            combined
+        }
+        _ => cedar.evaluate(
+            kind,
+            tool_name.as_deref(),
+            hook_payload,
+            &sig,
+            process_ctx,
+        )?,
+    };
+    let unresolved = shell_analysis.map(|a| a.unresolved).unwrap_or_default();
 
     // 5. Build verdict.
     //
@@ -60,6 +88,10 @@ pub fn adjudicate(
             Verdict::Ask { reason: reasons }
         } else {
             Verdict::Deny { reason: reasons }
+        }
+    } else if !unresolved.is_empty() {
+        Verdict::Ask {
+            reason: format!("Cannot verify what this runs: {}", unresolved.join("; ")),
         }
     } else if sig.severity >= Severity::Medium {
         Verdict::Ask {
