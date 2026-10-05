@@ -1,4 +1,5 @@
 program = "git"
+code_options = ["-c"]
 global_value_options = ["-c", "-C", "--git-dir", "--work-tree", "--namespace", "--exec-path"]
 
 [subcommands.push]

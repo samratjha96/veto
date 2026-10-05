@@ -32,6 +32,18 @@ forbid (
     context.path == "~/*"
 };
 
+@id("forbid-delete-credential-dir")
+@description("Block deleting the SSH, GnuPG or AWS credential directories.")
+forbid (
+    principal,
+    action == Action::"FileDelete",
+    resource
+) when {
+    context.path like "*/.ssh" ||
+    context.path like "*/.gnupg" ||
+    context.path like "*/.aws"
+};
+
 @id("forbid-delete-git-dir")
 @description("Block deleting a .git directory.")
 forbid (
@@ -157,14 +169,14 @@ forbid (
 };
 
 @id("forbid-git-filter-branch")
-@description("Block git filter-branch — rewrites repository history.")
+@description("Block git filter-branch and filter-repo — rewrite repository history.")
 forbid (
     principal,
     action == Action::"ShellCommand",
     resource
 ) when {
     context.program == "git" &&
-    context.subcommand == "filter-branch"
+    ["filter-branch", "filter-repo"].contains(context.subcommand)
 };
 
 // ═══════════════════════════════════════════════════════

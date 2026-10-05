@@ -110,6 +110,10 @@ pub struct Analysis {
     pub commands: Vec<Invocation>,
     /// Reasons the real command cannot be known before it runs.
     pub unresolved: Vec<String>,
+    /// Signatures must scan the command as written: a here-document body or a
+    /// pipe carries text that other commands run or send, which per-command
+    /// scan text drops.
+    pub scan_raw: bool,
 }
 
 pub fn analyze(command: &str) -> Analysis {
@@ -178,6 +182,7 @@ impl Walker {
     }
 
     fn pipeline(&mut self, pipeline: &Pipeline, depth: usize) {
+        self.analysis.scan_raw |= pipeline.seq.len() > 1;
         for (i, command) in pipeline.seq.iter().enumerate() {
             let argv = self.command(command, depth);
             if i > 0 && reads_script_from_stdin(argv.as_deref()) {
@@ -377,7 +382,18 @@ impl Walker {
                     writes: None,
                 })
             }
-            _ => None,
+            IoRedirect::File(..) => None,
+            IoRedirect::HereDocument(..) => {
+                self.analysis.scan_raw = true;
+                None
+            }
+            IoRedirect::OutputAndError(word, append) => {
+                let target = self.expand(&word.value, depth).fields.join(" ");
+                Some(Redirect {
+                    text: format!("{} {target}", if *append { "&>>" } else { "&>" }),
+                    writes: Some(target),
+                })
+            }
         }
     }
 

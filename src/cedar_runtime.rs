@@ -33,15 +33,21 @@ pub struct CedarDecision {
 }
 
 impl CedarDecision {
-    /// Combines two decisions: allowed only if both allow, reasons deduplicated.
+    /// Combines two decisions: allowed only if both allow. Reasons describe
+    /// the denials, so an allowing decision contributes none.
     pub fn merge(&mut self, other: CedarDecision) {
-        self.allowed &= other.allowed;
+        if other.allowed {
+            return;
+        }
+        if self.allowed {
+            *self = other;
+            return;
+        }
         for reason in other.deny_reasons {
             if !self.deny_reasons.contains(&reason) {
                 self.deny_reasons.push(reason);
             }
         }
-        self.policy_id = self.policy_id.take().or(other.policy_id);
     }
 }
 
