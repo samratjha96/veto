@@ -1,0 +1,105 @@
+program = "npm"
+# Options that take a value and can sit before the subcommand, space-separated.
+global_value_options = ["--prefix", "--registry", "--userconfig", "--globalconfig", "--cache", "--workspace", "-w", "--loglevel", "--otp", "--scope", "--tag", "--access"]
+
+# Short flags beyond those below are unmapped.
+
+[subcommands.install]
+aliases = ["i", "add"]
+short = { S = "save", D = "save-dev", O = "save-optional", P = "save-prod", E = "save-exact", g = "global", f = "force", w = "workspace" }
+value_options = ["-w", "--workspace", "--install-strategy", "--omit", "--include", "--before", "--min-release-age", "--cpu", "--os", "--libc", "--allow-git", "--registry", "--prefix", "--tag", "--cache", "--otp", "--loglevel", "--userconfig"]
+
+[subcommands.uninstall]
+aliases = ["remove", "rm", "un"]
+short = { S = "save", D = "save-dev", O = "save-optional", P = "save-prod", g = "global", w = "workspace" }
+value_options = ["-w", "--workspace", "--registry", "--prefix", "--loglevel"]
+
+[subcommands.publish]
+short = { w = "workspace" }
+value_options = ["--tag", "--access", "--otp", "--registry", "--provenance-file", "-w", "--workspace"]
+
+[subcommands.run]
+aliases = ["run-script"]
+short = { w = "workspace" }
+value_options = ["--script-shell", "-w", "--workspace"]
+
+[subcommands.exec]
+aliases = ["x"]
+short = { c = "call", w = "workspace", y = "yes" }
+value_options = ["--package", "-c", "--call", "-w", "--workspace"]
+
+[[examples]]
+command = "npm install left-pad"
+subcommand = "install"
+flags = []
+
+[[examples]]
+command = "npm install -g typescript"
+subcommand = "install"
+flags = ["global"]
+
+[[examples]]
+command = "npm --prefix /tmp/x install --save-dev --force pkg"
+subcommand = "install"
+flags = ["force", "save-dev"]
+
+[[examples]]
+command = "npm install -SE pkg"
+subcommand = "install"
+flags = ["save", "save-exact"]
+
+[[examples]]
+command = "npm install --registry=https://registry.example/ pkg"
+subcommand = "install"
+flags = ["registry"]
+
+[[examples]]
+command = "npm install --ignore-scripts --dry-run pkg"
+subcommand = "install"
+flags = ["dry-run", "ignore-scripts"]
+
+[[examples]]
+command = "npm uninstall -g typescript"
+subcommand = "uninstall"
+flags = ["global"]
+
+[[examples]]
+command = "npm publish --access public --tag next"
+subcommand = "publish"
+flags = ["access", "tag"]
+
+[[examples]]
+command = "npm publish --dry-run"
+subcommand = "publish"
+flags = ["dry-run"]
+
+[[examples]]
+command = "npm publish"
+subcommand = "publish"
+flags = []
+
+# Arguments after `--` belong to the script, not npm.
+[[examples]]
+command = "npm run build -- --force"
+subcommand = "run"
+flags = []
+
+[[examples]]
+command = "npm run -w pkg build --if-present"
+subcommand = "run"
+flags = ["if-present", "workspace"]
+
+[[examples]]
+command = "npm exec --yes --package=foo -- foo"
+subcommand = "exec"
+flags = ["package", "yes"]
+
+[[examples]]
+command = "npm exec -c ls"
+subcommand = "exec"
+flags = ["call"]
+
+[[examples]]
+command = "npm i -D left-pad"
+subcommand = "install"
+flags = ["save-dev"]

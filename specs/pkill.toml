@@ -1,0 +1,29 @@
+program = "pkill"
+# macOS/BSD options. Signals spelled `-9` or `-HUP` are not mapped: each character becomes its own flag.
+short = { a = "ancestors", f = "full", i = "ignore-case", l = "long", n = "newest", o = "oldest", q = "quiet", v = "invert", x = "exact", I = "confirm", L = "lock-pidfile", F = "pidfile", G = "gid", P = "ppid", U = "uid", d = "delimiter", g = "pgrp", t = "tty", u = "euid" }
+value_options = ["-F", "-G", "-P", "-U", "-d", "-g", "-t", "-u"]
+
+[[examples]]
+command = "pkill nginx"
+subcommand = ""
+flags = []
+
+[[examples]]
+command = "pkill -f nginx"
+subcommand = ""
+flags = ["full"]
+
+[[examples]]
+command = "pkill -9 -u alice sshd"
+subcommand = ""
+flags = ["9", "euid"]
+
+[[examples]]
+command = "pkill -9 -x -f foo"
+subcommand = ""
+flags = ["9", "exact", "full"]
+
+[[examples]]
+command = "pkill -P 1 -n -o worker"
+subcommand = ""
+flags = ["newest", "oldest", "ppid"]

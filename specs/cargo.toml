@@ -1,0 +1,91 @@
+program = "cargo"
+skipped_prefixes = ["+"]
+global_value_options = ["-C", "-Z", "--color", "--config"]
+
+# Optional-value options (`--bin [<NAME>]`, `-p [<SPEC>]`) are treated as flags only; their value is a harmless positional.
+
+[subcommands.install]
+short = { f = "force", n = "dry-run", F = "features", j = "jobs", v = "verbose", q = "quiet" }
+value_options = ["--version", "--index", "--registry", "--git", "--branch", "--tag", "--rev", "--path", "--root", "-F", "--features", "-j", "--jobs", "--profile", "--target", "--target-dir", "--message-format", "--color", "--config", "-Z"]
+
+[subcommands.publish]
+short = { n = "dry-run", F = "features", j = "jobs", v = "verbose", q = "quiet", p = "package" }
+value_options = ["--index", "--registry", "--exclude", "-F", "--features", "-j", "--jobs", "--target", "--target-dir", "--manifest-path", "--color", "--config", "-Z"]
+
+[subcommands.run]
+short = { r = "release", p = "package", F = "features", j = "jobs", v = "verbose", q = "quiet" }
+value_options = ["-F", "--features", "-j", "--jobs", "--profile", "--target", "--target-dir", "--manifest-path", "--message-format", "--color", "--config", "-Z"]
+
+[subcommands.clean]
+short = { n = "dry-run", r = "release", p = "package", v = "verbose", q = "quiet" }
+value_options = ["--profile", "--target", "--target-dir", "--manifest-path", "--color", "--config", "-Z"]
+
+[subcommands.yank]
+short = { v = "verbose", q = "quiet" }
+value_options = ["--version", "--index", "--registry", "--token", "--color", "--config", "-Z"]
+
+[[examples]]
+command = "cargo install ripgrep"
+subcommand = "install"
+flags = []
+
+[[examples]]
+command = "cargo install -f --locked ripgrep"
+subcommand = "install"
+flags = ["force", "locked"]
+
+[[examples]]
+command = "cargo install --git https://example.com/x/y --branch main tool"
+subcommand = "install"
+flags = ["branch", "git"]
+
+[[examples]]
+command = "cargo -Z unstable-options install -f tool"
+subcommand = "install"
+flags = ["force"]
+
+[[examples]]
+command = "cargo --color never publish --dry-run"
+subcommand = "publish"
+flags = ["dry-run"]
+
+[[examples]]
+command = "cargo publish --allow-dirty --no-verify"
+subcommand = "publish"
+flags = ["allow-dirty", "no-verify"]
+
+# The arguments after `--` go to the program, not cargo.
+[[examples]]
+command = "cargo run --release -- --force"
+subcommand = "run"
+flags = ["release"]
+
+[[examples]]
+command = "cargo run -r -p foo --bin x"
+subcommand = "run"
+flags = ["bin", "package", "release"]
+
+[[examples]]
+command = "cargo clean"
+subcommand = "clean"
+flags = []
+
+[[examples]]
+command = "cargo clean -n"
+subcommand = "clean"
+flags = ["dry-run"]
+
+[[examples]]
+command = "cargo clean -p foo --release"
+subcommand = "clean"
+flags = ["package", "release"]
+
+[[examples]]
+command = "cargo yank --version 1.0.0 foo"
+subcommand = "yank"
+flags = ["version"]
+
+[[examples]]
+command = "cargo yank --undo --version 1.0.0 foo"
+subcommand = "yank"
+flags = ["undo", "version"]

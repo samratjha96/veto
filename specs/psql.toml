@@ -1,0 +1,36 @@
+program = "psql"
+# From memory (psql is not installed).
+
+# The SQL text itself is never visible to describe.
+short = { c = "command", f = "file", d = "dbname", h = "host", U = "username", p = "port", w = "no-password", W = "password", X = "no-psqlrc", "1" = "single-transaction", q = "quiet", A = "no-align", t = "tuples-only", v = "set", o = "output", l = "list", a = "echo-all", e = "echo-queries", b = "echo-errors", x = "expanded" }
+value_options = ["-c", "--command", "-f", "--file", "-d", "--dbname", "-h", "--host", "-U", "--username", "-p", "--port", "-v", "--set", "--variable", "-o", "--output", "-L", "--log-file", "-F", "--field-separator", "-R", "--record-separator", "-P", "--pset", "-T", "--table-attr"]
+
+[[examples]]
+command = "psql -h db -U admin -d prod -c DROP"
+subcommand = ""
+flags = ["command", "dbname", "host", "username"]
+
+[[examples]]
+command = "psql -f schema.sql mydb"
+subcommand = ""
+flags = ["file"]
+
+[[examples]]
+command = "psql --command=SELECT1 --host=db"
+subcommand = ""
+flags = ["command", "host"]
+
+[[examples]]
+command = "psql -qAtX -c SELECT1"
+subcommand = ""
+flags = ["command", "no-align", "no-psqlrc", "quiet", "tuples-only"]
+
+[[examples]]
+command = "psql -1 -v ON_ERROR_STOP=1 -f x.sql"
+subcommand = ""
+flags = ["file", "set", "single-transaction"]
+
+[[examples]]
+command = "psql postgres://u@h/db"
+subcommand = ""
+flags = []

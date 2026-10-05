@@ -1,0 +1,36 @@
+program = "chmod"
+# BSD and GNU spellings combined. A symbolic mode such as `-x` is
+# indistinguishable from an option cluster and is reported as flag "x".
+short = { R = "recursive", H = "follow-cmdline-symlinks", L = "dereference", P = "no-dereference", f = "silent", h = "no-dereference", v = "verbose", c = "changes", N = "remove-acl" }
+value_options = ["--reference"]
+
+[[examples]]
+command = "chmod -R 755 dir"
+subcommand = ""
+flags = ["recursive"]
+
+[[examples]]
+command = "chmod -Rf 644 x"
+subcommand = ""
+flags = ["recursive", "silent"]
+
+[[examples]]
+command = "chmod --recursive a+x dir"
+subcommand = ""
+flags = ["recursive"]
+
+# Mode `-x` is read as a flag cluster.
+[[examples]]
+command = "chmod -R -x dir"
+subcommand = ""
+flags = ["recursive", "x"]
+
+[[examples]]
+command = "chmod --reference ref f"
+subcommand = ""
+flags = ["reference"]
+
+[[examples]]
+command = "chmod -hv 600 f"
+subcommand = ""
+flags = ["no-dereference", "verbose"]

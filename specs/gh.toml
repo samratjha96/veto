@@ -1,0 +1,133 @@
+program = "gh"
+# gh has no options that precede the subcommand and take a value.
+
+# Not expressible with one subcommand level:
+#  - the action (pr merge/close, repo delete, release delete, auth token/logout)
+#    is a positional, so `gh repo delete` and `gh repo view` differ only by a
+#    positional that describe discards.
+#  - -d means --delete-branch for pr merge/close but --draft for pr create;
+#    -m is --merge for pr merge but --milestone (value) for pr create;
+#    -r is --rebase for pr merge but --reviewer (value) for pr create.
+#    Mapped to the destructive meaning of pr merge; pr create gets false matches.
+#  - gh api: -X/--method flags the method but not its value, so DELETE and GET look alike.
+
+[subcommands.pr]
+short = { d = "delete-branch", m = "merge", r = "rebase", s = "squash", R = "repo", b = "body", F = "body-file", t = "title", A = "author-email", c = "comment", B = "base", H = "head", a = "assignee", l = "label" }
+# -m and -r are booleans for merge, so they are not listed as value options.
+value_options = ["-R", "--repo", "-b", "--body", "-F", "--body-file", "-t", "--title", "--subject", "-A", "--author-email", "-c", "--comment", "--match-head-commit", "-B", "--base", "-H", "--head", "-a", "--assignee", "-l", "--label"]
+
+[subcommands.repo]
+# Long options only; short flags here were not checked against --help.
+value_options = ["--description", "--homepage", "--template", "--gitignore", "--license", "--visibility", "--default-branch", "--source", "--remote", "--team", "--add-topic", "--remove-topic"]
+
+[subcommands.release]
+short = { R = "repo", y = "yes", d = "draft", n = "notes", F = "notes-file", p = "prerelease", t = "title" }
+value_options = ["-R", "--repo", "-n", "--notes", "-F", "--notes-file", "-t", "--title", "--target", "--discussion-category", "--notes-start-tag"]
+
+[subcommands.api]
+short = { X = "method", f = "raw-field", F = "field", H = "header", i = "include", q = "jq", t = "template", p = "preview" }
+value_options = ["-X", "--method", "-f", "--raw-field", "-F", "--field", "-H", "--header", "-q", "--jq", "-t", "--template", "-p", "--preview", "--input", "--hostname", "--cache"]
+
+[subcommands.auth]
+short = { c = "clipboard", p = "git-protocol", h = "hostname", s = "scopes", w = "web", u = "user" }
+value_options = ["-p", "--git-protocol", "-h", "--hostname", "-s", "--scopes", "-u", "--user"]
+
+[[examples]]
+command = "gh pr merge 12 --squash --delete-branch"
+subcommand = "pr"
+flags = ["delete-branch", "squash"]
+
+[[examples]]
+command = "gh pr merge 12 -sd --admin"
+subcommand = "pr"
+flags = ["admin", "delete-branch", "squash"]
+
+[[examples]]
+command = "gh pr create -R owner/repo --title x --draft"
+subcommand = "pr"
+flags = ["draft", "repo", "title"]
+
+[[examples]]
+command = "gh pr close 3 -c bye"
+subcommand = "pr"
+flags = ["comment"]
+
+[[examples]]
+command = "gh pr list"
+subcommand = "pr"
+flags = []
+
+[[examples]]
+command = "gh repo delete owner/x --yes"
+subcommand = "repo"
+flags = ["yes"]
+
+[[examples]]
+command = "gh repo create x --private"
+subcommand = "repo"
+flags = ["private"]
+
+[[examples]]
+command = "gh repo edit --visibility public --accept-visibility-change-consequences"
+subcommand = "repo"
+flags = ["accept-visibility-change-consequences", "visibility"]
+
+[[examples]]
+command = "gh release delete v1 --cleanup-tag -y"
+subcommand = "release"
+flags = ["cleanup-tag", "yes"]
+
+[[examples]]
+command = "gh release create v1 -d -t x"
+subcommand = "release"
+flags = ["draft", "title"]
+
+[[examples]]
+command = "gh release create v1 --target main --prerelease"
+subcommand = "release"
+flags = ["prerelease", "target"]
+
+[[examples]]
+command = "gh api repos/o/r"
+subcommand = "api"
+flags = []
+
+[[examples]]
+command = "gh api -X DELETE repos/o/r"
+subcommand = "api"
+flags = ["method"]
+
+[[examples]]
+command = "gh api --method=DELETE repos/o/r"
+subcommand = "api"
+flags = ["method"]
+
+[[examples]]
+command = "gh api -f title=x -H Accept:x repos/o/r/issues"
+subcommand = "api"
+flags = ["header", "raw-field"]
+
+[[examples]]
+command = "gh api --paginate user/repos"
+subcommand = "api"
+flags = ["paginate"]
+
+[[examples]]
+command = "gh auth login --with-token"
+subcommand = "auth"
+flags = ["with-token"]
+
+[[examples]]
+command = "gh auth login -h github.com -s repo"
+subcommand = "auth"
+flags = ["hostname", "scopes"]
+
+[[examples]]
+command = "gh auth token"
+subcommand = "auth"
+flags = []
+
+[[examples]]
+command = "gh auth logout -u bob"
+subcommand = "auth"
+flags = ["user"]

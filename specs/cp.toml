@@ -1,0 +1,35 @@
+program = "cp"
+# BSD and GNU spellings combined. -S is BSD's flag (GNU's -S takes a value; use --suffix).
+short = { R = "recursive", r = "recursive", a = "archive", c = "clone", f = "force", i = "interactive", l = "link", N = "no-preserve-flags", n = "no-clobber", p = "preserve", S = "no-sparse", s = "symbolic-link", v = "verbose", X = "no-xattrs", x = "one-file-system", H = "follow-cmdline-symlinks", L = "dereference", P = "no-dereference", t = "target-directory", T = "no-target-directory", u = "update", b = "backup" }
+value_options = ["-t", "--target-directory", "--suffix", "--sparse", "--no-preserve"]
+
+[[examples]]
+command = "cp -rf a b"
+subcommand = ""
+flags = ["force", "recursive"]
+
+[[examples]]
+command = "cp -R -n a b"
+subcommand = ""
+flags = ["no-clobber", "recursive"]
+
+[[examples]]
+command = "cp -a src dst"
+subcommand = ""
+flags = ["archive"]
+
+[[examples]]
+command = "cp --force --recursive a b"
+subcommand = ""
+flags = ["force", "recursive"]
+
+# The value of -t is not a positional.
+[[examples]]
+command = "cp -t dir -v a b"
+subcommand = ""
+flags = ["target-directory", "verbose"]
+
+[[examples]]
+command = "cp a b"
+subcommand = ""
+flags = []

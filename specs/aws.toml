@@ -1,0 +1,57 @@
+program = "aws"
+# Global options that take a value (verified against `aws help`). The `--opt=value` spelling needs no entry.
+global_value_options = ["--profile", "--region", "--output", "--query", "--endpoint-url", "--color", "--ca-bundle", "--cli-read-timeout", "--cli-connect-timeout"]
+
+# Not expressible with one subcommand level: the operation (s3 rm, s3 sync,
+# ec2 terminate-instances, iam delete-user) is a positional that describe discards,
+# so a policy cannot tell `aws s3 ls` from `aws s3 rm`. s3api, sts, etc. are not covered.
+# Multi-value options (`--instance-ids i-1 i-2`) consume only the first value; the rest are ignored positionals.
+
+[subcommands.s3]
+value_options = ["--profile", "--region", "--output", "--query", "--endpoint-url", "--color", "--ca-bundle", "--cli-read-timeout", "--cli-connect-timeout", "--include", "--exclude", "--request-payer", "--page-size", "--acl", "--storage-class", "--sse", "--sse-kms-key-id", "--content-type", "--metadata", "--source-region", "--expected-size"]
+
+[subcommands.ec2]
+value_options = ["--profile", "--region", "--output", "--query", "--endpoint-url", "--color", "--ca-bundle", "--cli-read-timeout", "--cli-connect-timeout", "--instance-ids", "--filters", "--cli-input-json", "--cli-input-yaml", "--image-id", "--instance-type", "--key-name", "--security-group-ids", "--subnet-id", "--volume-id", "--group-id"]
+
+[subcommands.iam]
+value_options = ["--profile", "--region", "--output", "--query", "--endpoint-url", "--color", "--ca-bundle", "--cli-read-timeout", "--cli-connect-timeout", "--user-name", "--role-name", "--group-name", "--policy-arn", "--policy-name", "--policy-document", "--cli-input-json", "--cli-input-yaml"]
+
+[[examples]]
+command = "aws s3 rm s3://b/k --recursive"
+subcommand = "s3"
+flags = ["recursive"]
+
+[[examples]]
+command = "aws --profile prod --region us-east-1 s3 sync . s3://b --delete"
+subcommand = "s3"
+flags = ["delete"]
+
+[[examples]]
+command = "aws s3 cp a s3://b/ --dryrun"
+subcommand = "s3"
+flags = ["dryrun"]
+
+[[examples]]
+command = "aws ec2 terminate-instances --instance-ids i-123 --dry-run"
+subcommand = "ec2"
+flags = ["dry-run", "instance-ids"]
+
+[[examples]]
+command = "aws --region=eu-west-1 ec2 describe-instances"
+subcommand = "ec2"
+flags = []
+
+[[examples]]
+command = "aws iam delete-user --user-name bob"
+subcommand = "iam"
+flags = ["user-name"]
+
+[[examples]]
+command = "aws iam create-access-key --user-name bob --output json"
+subcommand = "iam"
+flags = ["output", "user-name"]
+
+[[examples]]
+command = "aws --profile prod iam list-users"
+subcommand = "iam"
+flags = []

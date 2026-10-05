@@ -1,0 +1,23 @@
+program = "tee"
+# macOS options; GNU long spellings are their own names.
+short = { a = "append", i = "ignore-interrupts" }
+
+[[examples]]
+command = "tee out.txt"
+subcommand = ""
+flags = []
+
+[[examples]]
+command = "tee -a log.txt"
+subcommand = ""
+flags = ["append"]
+
+[[examples]]
+command = "tee -ai log.txt"
+subcommand = ""
+flags = ["append", "ignore-interrupts"]
+
+[[examples]]
+command = "tee --append log.txt"
+subcommand = ""
+flags = ["append"]

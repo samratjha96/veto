@@ -1,0 +1,54 @@
+program = "pip"
+aliases = ["pip3"]
+# Value-taking options that may precede the subcommand (verified against `pip install --help`).
+global_value_options = ["--python", "--log", "--proxy", "--retries", "--timeout", "--exists-action", "--trusted-host", "--cert", "--client-cert", "--cache-dir", "--use-feature", "--use-deprecated", "--keyring-provider", "--resume-retries"]
+
+# `python -m pip` is a different program string and is not covered.
+
+[subcommands.install]
+short = { r = "requirement", c = "constraint", e = "editable", t = "target", U = "upgrade", I = "ignore-installed", C = "config-settings", i = "index-url", f = "find-links", q = "quiet", v = "verbose" }
+value_options = ["-r", "--requirement", "-c", "--constraint", "-e", "--editable", "-t", "--target", "--root", "--prefix", "--upgrade-strategy", "-C", "--config-settings", "-i", "--index-url", "--extra-index-url", "-f", "--find-links", "--no-binary", "--only-binary", "--report", "--group", "--progress-bar", "--root-user-action"]
+
+[subcommands.uninstall]
+short = { r = "requirement", y = "yes", q = "quiet", v = "verbose" }
+value_options = ["-r", "--requirement", "--root-user-action"]
+
+[[examples]]
+command = "pip install requests"
+subcommand = "install"
+flags = []
+
+[[examples]]
+command = "pip install -U --user requests"
+subcommand = "install"
+flags = ["upgrade", "user"]
+
+[[examples]]
+command = "pip --python /usr/bin/python3 install --break-system-packages requests"
+subcommand = "install"
+flags = ["break-system-packages"]
+
+[[examples]]
+command = "pip install -r requirements.txt --index-url https://pypi.example/simple"
+subcommand = "install"
+flags = ["index-url", "requirement"]
+
+[[examples]]
+command = "pip install -e ."
+subcommand = "install"
+flags = ["editable"]
+
+[[examples]]
+command = "pip uninstall -y requests"
+subcommand = "uninstall"
+flags = ["yes"]
+
+[[examples]]
+command = "pip uninstall -r requirements.txt"
+subcommand = "uninstall"
+flags = ["requirement"]
+
+[[examples]]
+command = "pip3 install -U requests"
+subcommand = "install"
+flags = ["upgrade"]
