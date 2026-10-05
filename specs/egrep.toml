@@ -1,0 +1,7 @@
+program = "egrep"
+arguments_are_data = true
+
+[[examples]]
+command = "egrep x y"
+subcommand = ""
+flags = []

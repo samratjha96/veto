@@ -1,0 +1,7 @@
+program = "echo"
+arguments_are_data = true
+
+[[examples]]
+command = "echo x y"
+subcommand = ""
+flags = []

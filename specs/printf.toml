@@ -1,0 +1,7 @@
+program = "printf"
+arguments_are_data = true
+
+[[examples]]
+command = "printf x y"
+subcommand = ""
+flags = []

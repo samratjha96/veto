@@ -1,0 +1,7 @@
+program = "rg"
+arguments_are_data = true
+
+[[examples]]
+command = "rg x y"
+subcommand = ""
+flags = []

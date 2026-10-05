@@ -1,0 +1,7 @@
+program = "fgrep"
+arguments_are_data = true
+
+[[examples]]
+command = "fgrep x y"
+subcommand = ""
+flags = []

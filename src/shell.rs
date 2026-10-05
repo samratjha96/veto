@@ -34,6 +34,9 @@ pub struct Invocation {
     pub subcommand: String,
     /// Canonical flag names from the command spec; empty without one.
     pub flags: Vec<String>,
+    /// What signature rules should read: the command without arguments that are
+    /// only data to it, so `echo "rm -rf /"` is not a destructive command.
+    pub scan_text: String,
 }
 
 impl Invocation {
@@ -42,12 +45,22 @@ impl Invocation {
         argv[0] = basename(&argv[0]).to_string();
         let facts = command_spec::describe(&argv);
         let mut text = argv.join(" ");
+        let mut scan_text = argv
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !facts.data.contains(i))
+            .map(|(_, a)| a.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
         for redirect in redirects {
             text.push(' ');
             text.push_str(redirect);
+            scan_text.push(' ');
+            scan_text.push_str(redirect);
         }
         Self {
             text,
+            scan_text,
             program: if facts.program.is_empty() {
                 argv[0].clone()
             } else {
@@ -62,6 +75,7 @@ impl Invocation {
     fn unparsed(text: &str) -> Self {
         Self {
             text: text.to_string(),
+            scan_text: text.to_string(),
             program: String::new(),
             subcommand: String::new(),
             flags: Vec::new(),
@@ -280,6 +294,8 @@ impl Walker {
                     .position(|a| a.starts_with('-') && !a.starts_with("--") && a.contains('c'));
                 if let Some(script) = script_flag.and_then(|i| rest.get(i + 1)) {
                     self.program(script, depth + 1);
+                } else if script_flag.is_none() && rest[1..].iter().any(|a| !a.starts_with('-')) {
+                    self.unresolved("a shell runs a script file");
                 }
             }
             _ => {}
