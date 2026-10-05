@@ -7,7 +7,7 @@ use crate::process_context;
 use crate::shell;
 use crate::signature::{self, Severity, SignatureContext};
 use anyhow::Result;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 /// Result of adjudication, including context for audit logging.
 pub struct AdjudicationResult {
@@ -65,13 +65,26 @@ pub fn adjudicate(
                     process_ctx,
                     Some(command),
                 )?;
-                combined.allowed &= decision.allowed;
-                for reason in decision.deny_reasons {
-                    if !combined.deny_reasons.contains(&reason) {
-                        combined.deny_reasons.push(reason);
+                combined.merge(decision);
+                // Files the command touches get the same policies as the file tools.
+                for effect in &command.effects {
+                    let mut file_payload = json!({
+                        "tool_name": effect.kind.tool_name(),
+                        "tool_input": {"file_path": effect.path},
+                    });
+                    if let Some(cwd) = hook_payload.get("cwd") {
+                        file_payload["cwd"] = cwd.clone();
                     }
+                    let decision = cedar.evaluate(
+                        kind,
+                        Some(effect.kind.tool_name()),
+                        &file_payload,
+                        &sig,
+                        None,
+                        None,
+                    )?;
+                    combined.merge(decision);
                 }
-                combined.policy_id = combined.policy_id.or(decision.policy_id);
             }
             combined
         }

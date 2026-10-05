@@ -5,6 +5,7 @@
 //! on a refspec forces), and `describe` turns an argv into the subcommand and
 //! canonical flags that policies match on. A tool with no spec yields no facts.
 
+use crate::effects::{Effect, EffectKind};
 use include_dir::{Dir, include_dir};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -21,6 +22,8 @@ pub struct Facts {
     /// Indexes into argv of arguments that are plain data to the tool (option
     /// values, or everything for a tool whose arguments are text), not code or paths.
     pub data: Vec<usize>,
+    /// Files the command writes or deletes, as the spec says it treats its operands.
+    pub effects: Vec<Effect>,
 }
 
 /// One tool's spec file in `specs/`.
@@ -72,6 +75,24 @@ struct Subcommand {
     /// A positional argument starting with the prefix implies the flag.
     #[serde(default)]
     prefix_flags: HashMap<String, String>,
+    /// What happens to every operand (`rm` deletes, `tee` writes).
+    #[serde(default)]
+    operands: Option<EffectKind>,
+    /// With two or more operands: what happens to all but the last (`mv` deletes).
+    #[serde(default)]
+    sources: Option<EffectKind>,
+    /// With two or more operands: what happens to the last (`cp`, `mv` write).
+    #[serde(default)]
+    destination: Option<EffectKind>,
+    /// An operand starting with the prefix acts on the rest of it (`dd of=PATH`).
+    #[serde(default)]
+    prefix_effects: HashMap<String, EffectKind>,
+    /// Operand effects only apply with this flag (`sed -i`).
+    #[serde(default)]
+    effects_require_flag: Option<String>,
+    /// The first operand is a script, not a file, unless `-e` or `-f` supplied it.
+    #[serde(default)]
+    script_operand: bool,
 }
 
 #[derive(Deserialize, Clone)]
@@ -144,9 +165,11 @@ pub fn describe(argv: &[String]) -> Facts {
     let takes_value =
         |option: &str| spec.is_some_and(|s| s.value_options.iter().any(|o| o == option));
     let mut flags = Vec::new();
+    let mut operands: Vec<&str> = Vec::new();
     let mut options_ended = false;
     while let Some((_, arg)) = args.next() {
         if options_ended || !arg.starts_with('-') || arg == "-" {
+            operands.push(arg);
             for (prefix, flag) in spec.iter().flat_map(|s| &s.prefix_flags) {
                 if arg.starts_with(prefix.as_str()) {
                     flags.push(flag.clone());
@@ -186,12 +209,61 @@ pub fn describe(argv: &[String]) -> Facts {
     if tool.arguments_are_data {
         data = (1..argv.len()).collect();
     }
+    let effects = spec.map_or_else(Vec::new, |s| file_effects(s, &operands, &flags));
     Facts {
         program: tool.program.clone(),
         subcommand,
         flags,
         data,
+        effects,
     }
+}
+
+fn file_effects(spec: &Subcommand, operands: &[&str], flags: &[String]) -> Vec<Effect> {
+    if spec
+        .effects_require_flag
+        .as_ref()
+        .is_some_and(|required| !flags.contains(required))
+    {
+        return Vec::new();
+    }
+    let has_script_flag = flags.iter().any(|f| f == "expression" || f == "file");
+    let skip = usize::from(spec.script_operand && !has_script_flag);
+    let operands: Vec<&str> = operands
+        .iter()
+        .copied()
+        .filter(|o| !o.is_empty())
+        .skip(skip)
+        .collect();
+
+    let mut effects = Vec::new();
+    let mut add = |kind: EffectKind, path: &str| {
+        effects.push(Effect {
+            kind,
+            path: path.to_string(),
+        })
+    };
+    for operand in &operands {
+        if let Some(kind) = spec.operands {
+            add(kind, operand);
+        }
+        for (prefix, kind) in &spec.prefix_effects {
+            if let Some(path) = operand.strip_prefix(prefix.as_str()) {
+                add(*kind, path);
+            }
+        }
+    }
+    if let [sources @ .., destination] = operands.as_slice()
+        && !sources.is_empty()
+    {
+        if let Some(kind) = spec.sources {
+            sources.iter().for_each(|s| add(kind, s));
+        }
+        if let Some(kind) = spec.destination {
+            add(kind, destination);
+        }
+    }
+    effects
 }
 
 #[cfg(test)]
@@ -224,6 +296,27 @@ mod tests {
         }
         assert!(checked > 0, "no spec examples found");
         assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    fn effects(command: &str) -> Vec<(EffectKind, String)> {
+        describe(command)
+            .effects
+            .into_iter()
+            .map(|e| (e.kind, e.path))
+            .collect()
+    }
+
+    #[test]
+    fn operand_effects() {
+        use EffectKind::{Delete, Write};
+        let p = |s: &str| s.to_string();
+        assert_eq!(effects("rm -rf a b"), [(Delete, p("a")), (Delete, p("b"))]);
+        assert_eq!(effects("cp a b"), [(Write, p("b"))]);
+        assert_eq!(effects("cp a"), []);
+        assert_eq!(effects("mv a b"), [(Delete, p("a")), (Write, p("b"))]);
+        assert_eq!(effects("dd if=x of=/y"), [(Write, p("/y"))]);
+        assert_eq!(effects("sed -i s/a/b/ f"), [(Write, p("f"))]);
+        assert_eq!(effects("sed s/a/b/ f"), []);
     }
 
     #[test]

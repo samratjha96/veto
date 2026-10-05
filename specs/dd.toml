@@ -1,4 +1,5 @@
 program = "dd"
+prefix_effects = { "of=" = "write" }
 # dd takes key=value operands, not options, so only prefix_flags apply.
 # `of=/dev/null` also reports output-device.
 prefix_flags = { "of=" = "output-file", "of=/dev/" = "output-device", "seek=" = "seek", "oseek=" = "seek", "conv=notrunc" = "notrunc" }

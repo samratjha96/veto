@@ -1,4 +1,5 @@
 program = "truncate"
+operands = "write"
 # macOS options. `-s` takes the size as the next argument; `-s0` is not split.
 short = { c = "no-create", r = "reference", s = "size" }
 value_options = ["-r", "-s"]
