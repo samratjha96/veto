@@ -48,7 +48,11 @@ impl Invocation {
         }
         Self {
             text,
-            program: argv[0].clone(),
+            program: if facts.program.is_empty() {
+                argv[0].clone()
+            } else {
+                facts.program
+            },
             subcommand: facts.subcommand,
             flags: facts.flags,
         }

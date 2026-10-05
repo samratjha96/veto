@@ -13,6 +13,9 @@ use std::sync::LazyLock;
 /// Facts about one invocation, independent of how its arguments were spelled.
 #[derive(Debug, Default, PartialEq)]
 pub struct Facts {
+    /// The spec's name for the tool, so `pip3` and `pip` match the same policies.
+    /// Empty when the tool has no spec.
+    pub program: String,
     pub subcommand: String,
     pub flags: Vec<String>,
 }
@@ -102,7 +105,11 @@ pub fn describe(argv: &[String]) -> Facts {
     } else {
         let mut word = None;
         while let Some(arg) = args.next() {
-            if tool.skipped_prefixes.iter().any(|p| arg.starts_with(p.as_str())) {
+            if tool
+                .skipped_prefixes
+                .iter()
+                .any(|p| arg.starts_with(p.as_str()))
+            {
                 continue;
             }
             if !arg.starts_with('-') {
@@ -126,7 +133,8 @@ pub fn describe(argv: &[String]) -> Facts {
         }
     };
 
-    let takes_value = |option: &str| spec.is_some_and(|s| s.value_options.iter().any(|o| o == option));
+    let takes_value =
+        |option: &str| spec.is_some_and(|s| s.value_options.iter().any(|o| o == option));
     let mut flags = Vec::new();
     let mut options_ended = false;
     while let Some(arg) = args.next() {
@@ -167,7 +175,11 @@ pub fn describe(argv: &[String]) -> Facts {
     flags.sort();
     flags.dedup();
 
-    Facts { subcommand, flags }
+    Facts {
+        program: tool.program.clone(),
+        subcommand,
+        flags,
+    }
 }
 
 #[cfg(test)]

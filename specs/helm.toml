@@ -1,0 +1,17 @@
+program = "helm"
+global_value_options = ["-n", "--namespace", "--kube-context", "--kubeconfig", "--kube-token", "--kube-apiserver", "--registry-config", "--repository-cache", "--repository-config"]
+
+[subcommands.uninstall]
+aliases = ["delete", "del", "un"]
+short = { n = "namespace" }
+value_options = ["-n", "--namespace", "--timeout"]
+
+[[examples]]
+command = "helm uninstall my-release -n prod"
+subcommand = "uninstall"
+flags = ["namespace"]
+
+[[examples]]
+command = "helm delete my-release"
+subcommand = "uninstall"
+flags = []
