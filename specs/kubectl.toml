@@ -50,6 +50,17 @@ value_options = ["-c", "-f", "-n", "--container", "--filename", "--namespace", "
 short = { f = "filename", k = "kustomize", n = "namespace", o = "output", R = "recursive", w = "watch" }
 value_options = ["-f", "-k", "-n", "-o", "--filename", "--kustomize", "--namespace", "--output", "--revision", "--to-revision", "--timeout"]
 
+# Resource types are operands; only the one a policy needs is a nested subcommand.
+[subcommands.delete.subcommands.namespace]
+aliases = ["ns", "namespaces"]
+short = { A = "all-namespaces", f = "filename", i = "interactive", k = "kustomize", l = "selector", n = "namespace", o = "output", R = "recursive" }
+value_options = ["-f", "-k", "-l", "-n", "-o", "--filename", "--kustomize", "--selector", "--namespace", "--output", "--field-selector", "--grace-period", "--timeout", "--raw"]
+
+[[examples]]
+command = "kubectl delete ns prod --wait"
+subcommand = "delete namespace"
+flags = ["wait"]
+
 [[examples]]
 command = "kubectl delete pod web -n prod --force --grace-period=0"
 subcommand = "delete"

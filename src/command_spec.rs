@@ -61,6 +61,10 @@ struct Tool {
 
 #[derive(Deserialize, Default, Clone)]
 struct Subcommand {
+    /// Subcommands below this one (`docker system prune`). An operand naming one
+    /// switches to its spec and extends the reported subcommand (`system prune`).
+    #[serde(default)]
+    subcommands: HashMap<String, Subcommand>,
     /// Other spellings of the subcommand, e.g. `i` for `npm install`.
     #[serde(default)]
     aliases: Vec<String>,
@@ -129,7 +133,7 @@ pub fn describe(argv: &[String]) -> Facts {
 
     let mut data = Vec::new();
     let mut args = argv.iter().enumerate().skip(1);
-    let (subcommand, spec) = if tool.subcommands.is_empty() {
+    let (mut subcommand, mut spec) = if tool.subcommands.is_empty() {
         (String::new(), Some(&tool.options))
     } else {
         let mut word = None;
@@ -152,23 +156,29 @@ pub fn describe(argv: &[String]) -> Facts {
         let Some(word) = word else {
             return Facts::default();
         };
-        match tool
-            .subcommands
-            .iter()
-            .find(|(name, s)| *name == word || s.aliases.contains(word))
-        {
+        match find_subcommand(&tool.subcommands, word) {
             Some((name, spec)) => (name.clone(), Some(spec)),
             None => (word.clone(), None),
         }
     };
 
-    let takes_value =
-        |option: &str| spec.is_some_and(|s| s.value_options.iter().any(|o| o == option));
+    let takes_value = |spec: Option<&Subcommand>, option: &str| {
+        spec.is_some_and(|s| s.value_options.iter().any(|o| o == option))
+    };
     let mut flags = Vec::new();
     let mut operands: Vec<&str> = Vec::new();
     let mut options_ended = false;
     while let Some((_, arg)) = args.next() {
         if options_ended || !arg.starts_with('-') || arg == "-" {
+            if !options_ended
+                && operands.is_empty()
+                && let Some((name, nested)) =
+                    spec.and_then(|s| find_subcommand(&s.subcommands, arg))
+            {
+                subcommand = format!("{subcommand} {name}");
+                spec = Some(nested);
+                continue;
+            }
             operands.push(arg);
             for (prefix, flag) in spec.iter().flat_map(|s| &s.prefix_flags) {
                 if arg.starts_with(prefix.as_str()) {
@@ -184,7 +194,7 @@ pub fn describe(argv: &[String]) -> Facts {
                 None => (long, false),
             };
             flags.push(name.to_string());
-            if !has_value && takes_value(arg) {
+            if !has_value && takes_value(spec, arg) {
                 data.extend(args.next().map(|(i, _)| i));
             }
         } else {
@@ -194,7 +204,7 @@ pub fn describe(argv: &[String]) -> Facts {
                     .and_then(|s| s.short.get(&c))
                     .map_or_else(|| c.to_string(), Clone::clone);
                 flags.push(name);
-                if takes_value(&format!("-{c}")) {
+                if takes_value(spec, &format!("-{c}")) {
                     if i + c.len_utf8() == cluster.len() {
                         data.extend(args.next().map(|(i, _)| i));
                     }
@@ -217,6 +227,15 @@ pub fn describe(argv: &[String]) -> Facts {
         data,
         effects,
     }
+}
+
+fn find_subcommand<'a>(
+    subcommands: &'a HashMap<String, Subcommand>,
+    word: &str,
+) -> Option<(&'a String, &'a Subcommand)> {
+    subcommands
+        .iter()
+        .find(|(name, s)| *name == word || s.aliases.iter().any(|a| a == word))
 }
 
 fn file_effects(spec: &Subcommand, operands: &[&str], flags: &[String]) -> Vec<Effect> {

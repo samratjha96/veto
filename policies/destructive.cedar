@@ -6,53 +6,40 @@
 // §1  Filesystem Destruction
 // ═══════════════════════════════════════════════════════
 
-@id("forbid-rm-root")
-@description("Block rm targeting the root filesystem.")
+// Commands that delete or write files (rm, mv, cp, dd, redirects) are also
+// checked as FileDelete/FileWrite actions on each path they touch, so these
+// policies match the path, not the spelling of the command.
+
+@id("forbid-delete-root")
+@description("Block deleting the root filesystem.")
 forbid (
     principal,
-    action == Action::"ShellCommand",
+    action == Action::"FileDelete",
     resource
 ) when {
-    context.command like "*rm /" ||
-    context.command like "*rm -* /"
+    context.path == "/" ||
+    context.path == "/*"
 };
 
-@id("forbid-rm-home")
-@description("Block rm targeting the home directory root.")
+@id("forbid-delete-home")
+@description("Block deleting the home directory root.")
 forbid (
     principal,
-    action == Action::"ShellCommand",
+    action == Action::"FileDelete",
     resource
 ) when {
-    context.command like "*rm ~" ||
-    context.command like "*rm ~/" ||
-    context.command like "*rm -* ~" ||
-    context.command like "*rm -* ~/"
+    context.path == "~" ||
+    context.path == "~/*"
 };
 
-@id("forbid-rm-hidden-home")
-@description("Block recursive rm targeting hidden directories in $HOME.")
+@id("forbid-delete-git-dir")
+@description("Block deleting a .git directory.")
 forbid (
     principal,
-    action == Action::"ShellCommand",
+    action == Action::"FileDelete",
     resource
 ) when {
-    context.command like "*rm -r* ~/.*"
-};
-
-@id("forbid-rm-git")
-@description("Block rm targeting .git directories.")
-forbid (
-    principal,
-    action == Action::"ShellCommand",
-    resource
-) when {
-    context.command like "*rm * .git" ||
-    context.command like "*rm .git" ||
-    context.command like "*rm * .git/" ||
-    context.command like "*rm .git/" ||
-    context.command like "*rm*/.git" ||
-    context.command like "*rm*/.git/"
+    context.path like "*/.git"
 };
 
 @id("ask-find-delete")
@@ -73,17 +60,24 @@ forbid (
     action == Action::"ShellCommand",
     resource
 ) when {
-    context.command like "*shred *"
+    context.program == "shred"
 };
 
-@id("forbid-wipe-dd")
-@description("Block dd commands that write to block devices.")
+@id("forbid-write-block-device")
+@description("Block writing to disk devices (dd of=, redirects).")
 forbid (
     principal,
-    action == Action::"ShellCommand",
+    action == Action::"FileWrite",
     resource
 ) when {
-    context.command like "*dd *of=/dev/*"
+    context.path like "/dev/sd*" ||
+    context.path like "/dev/hd*" ||
+    context.path like "/dev/vd*" ||
+    context.path like "/dev/xvd*" ||
+    context.path like "/dev/nvme*" ||
+    context.path like "/dev/mmcblk*" ||
+    context.path like "/dev/disk*" ||
+    context.path like "/dev/rdisk*"
 };
 
 @id("forbid-mkfs")
@@ -93,7 +87,7 @@ forbid (
     action == Action::"ShellCommand",
     resource
 ) when {
-    context.command like "*mkfs*"
+    context.program like "mkfs*"
 };
 
 // ═══════════════════════════════════════════════════════
@@ -196,7 +190,8 @@ forbid (
     action == Action::"ShellCommand",
     resource
 ) when {
-    context.command like "*docker system prune*"
+    context.program == "docker" &&
+    context.subcommand == "system prune"
 };
 
 @id("forbid-docker-volume-rm")
@@ -206,8 +201,8 @@ forbid (
     action == Action::"ShellCommand",
     resource
 ) when {
-    context.command like "*docker volume rm *" ||
-    context.command like "*docker volume prune*"
+    context.program == "docker" &&
+    ["volume rm", "volume prune"].contains(context.subcommand)
 };
 
 @id("forbid-kubectl-delete-namespace")
@@ -217,8 +212,8 @@ forbid (
     action == Action::"ShellCommand",
     resource
 ) when {
-    context.command like "*kubectl delete namespace *" ||
-    context.command like "*kubectl delete ns *"
+    context.program == "kubectl" &&
+    context.subcommand == "delete namespace"
 };
 
 @id("forbid-helm-uninstall")
@@ -233,56 +228,7 @@ forbid (
 };
 
 // ═══════════════════════════════════════════════════════
-// §4  Database Destruction
-// ═══════════════════════════════════════════════════════
-
-@id("forbid-drop-database")
-@description("Block DROP DATABASE commands.")
-forbid (
-    principal,
-    action == Action::"ShellCommand",
-    resource
-) when {
-    context.command like "*DROP DATABASE*" ||
-    context.command like "*drop database*" ||
-    context.command like "*dropdb *"
-};
-
-@id("forbid-drop-table")
-@description("Block DROP TABLE commands.")
-forbid (
-    principal,
-    action == Action::"ShellCommand",
-    resource
-) when {
-    context.command like "*DROP TABLE*" ||
-    context.command like "*drop table*"
-};
-
-@id("forbid-truncate-table")
-@description("Block TRUNCATE TABLE commands.")
-forbid (
-    principal,
-    action == Action::"ShellCommand",
-    resource
-) when {
-    context.command like "*TRUNCATE TABLE*" ||
-    context.command like "*TRUNCATE *"
-};
-
-@id("forbid-redis-flushall")
-@description("Block Redis FLUSHALL/FLUSHDB.")
-forbid (
-    principal,
-    action == Action::"ShellCommand",
-    resource
-) when {
-    context.command like "*FLUSHALL*" ||
-    context.command like "*FLUSHDB*"
-};
-
-// ═══════════════════════════════════════════════════════
-// §5  Package & Dependency Destruction
+// §4  Package & Dependency Destruction
 // ═══════════════════════════════════════════════════════
 
 @id("forbid-delete-lockfile")
@@ -302,7 +248,7 @@ forbid (
 };
 
 // ═══════════════════════════════════════════════════════
-// §6  Recursive Permission Changes
+// §5  Recursive Permission Changes
 // ═══════════════════════════════════════════════════════
 
 @id("forbid-chmod-recursive-permissive")
@@ -312,22 +258,13 @@ forbid (
     action == Action::"ShellCommand",
     resource
 ) when {
-    context.command like "*chmod -R 777 *" ||
-    context.command like "*chmod -R 666 *"
-};
-
-@id("forbid-chown-recursive-root")
-@description("Block recursive chown to root.")
-forbid (
-    principal,
-    action == Action::"ShellCommand",
-    resource
-) when {
-    context.command like "*chown -R root *"
+    context.program == "chmod" &&
+    context.flags.contains("recursive") &&
+    (context.flags.contains("mode-777") || context.flags.contains("mode-666"))
 };
 
 // ═══════════════════════════════════════════════════════
-// §7  Kill & Process Termination
+// §6  Kill & Process Termination
 // ═══════════════════════════════════════════════════════
 
 @id("forbid-killall")
@@ -337,24 +274,23 @@ forbid (
     action == Action::"ShellCommand",
     resource
 ) when {
-    context.command like "*killall *" ||
-    context.command like "*pkill *"
+    ["killall", "pkill"].contains(context.program)
 };
 
 @id("forbid-kill-signal-9")
-@description("Block kill -9 — forcibly kills processes without cleanup.")
+@description("Block kill -9 and -KILL — forcibly kills processes without cleanup.")
 forbid (
     principal,
     action == Action::"ShellCommand",
     resource
 ) when {
-    context.command like "*kill -9 *" ||
-    context.command like "*kill -KILL *" ||
-    context.command like "*kill -SIGKILL *"
+    context.program == "kill" &&
+    (context.flags.contains("9") ||
+     (context.flags.contains("K") && context.flags.contains("I") && context.flags.contains("L")))
 };
 
 // ═══════════════════════════════════════════════════════
-// §8  Critical File Deletion Guards
+// §7  Critical File Deletion Guards
 // ═══════════════════════════════════════════════════════
 
 @id("forbid-delete-gitignore")

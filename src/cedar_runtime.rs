@@ -311,24 +311,24 @@ mod tests {
     }
 
     #[test]
-    fn blocks_rm_root() {
+    fn blocks_deleting_root() {
         let rt = test_runtime();
         let payload = json!({
-            "tool_name": "Bash",
-            "tool_input": {"command": "rm -rf /"}
+            "tool_name": "FileDelete",
+            "tool_input": {"file_path": "/"}
         });
         let sig = SignatureContext::default();
         let decision = rt
             .evaluate(
                 &HookKind::BeforeTool,
-                Some("Bash"),
+                Some("FileDelete"),
                 &payload,
                 &sig,
                 None,
                 None,
             )
             .unwrap();
-        assert!(!decision.allowed, "rm -rf / should be denied");
+        assert!(!decision.allowed, "deleting / should be denied");
     }
 
     #[test]

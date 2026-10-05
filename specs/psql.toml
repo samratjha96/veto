@@ -1,9 +1,10 @@
 program = "psql"
 # From memory (psql is not installed).
 
-# The SQL text itself is never visible to describe.
+# `-c` and `--command` are deliberately not value options: the SQL is code, so it
+# must stay visible to the YARA scan instead of being treated as data.
 short = { c = "command", f = "file", d = "dbname", h = "host", U = "username", p = "port", w = "no-password", W = "password", X = "no-psqlrc", "1" = "single-transaction", q = "quiet", A = "no-align", t = "tuples-only", v = "set", o = "output", l = "list", a = "echo-all", e = "echo-queries", b = "echo-errors", x = "expanded" }
-value_options = ["-c", "--command", "-f", "--file", "-d", "--dbname", "-h", "--host", "-U", "--username", "-p", "--port", "-v", "--set", "--variable", "-o", "--output", "-L", "--log-file", "-F", "--field-separator", "-R", "--record-separator", "-P", "--pset", "-T", "--table-attr"]
+value_options = ["-f", "--file", "-d", "--dbname", "-h", "--host", "-U", "--username", "-p", "--port", "-v", "--set", "--variable", "-o", "--output", "-L", "--log-file", "-F", "--field-separator", "-R", "--record-separator", "-P", "--pset", "-T", "--table-attr"]
 
 [[examples]]
 command = "psql -h db -U admin -d prod -c DROP"
