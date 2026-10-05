@@ -11,7 +11,7 @@ use crate::effects::{Effect, EffectKind};
 use brush_parser::ast::{
     AndOr, AndOrList, AssignmentName, AssignmentValue, Command, CommandPrefixOrSuffixItem,
     CompoundCommand, CompoundList, IoFileRedirectKind, IoFileRedirectTarget, IoRedirect, Pipeline,
-    SimpleCommand, Word,
+    RedirectList, SimpleCommand, Word,
 };
 use brush_parser::word::{Parameter, ParameterExpr, WordPiece, WordPieceWithSource};
 use brush_parser::{Parser, ParserOptions};
@@ -195,15 +195,33 @@ impl Walker {
     fn command(&mut self, command: &Command, depth: usize) -> Option<Vec<String>> {
         match command {
             Command::Simple(simple) => self.simple(simple, depth),
-            Command::Compound(compound, _) => {
+            Command::Compound(compound, redirects) => {
                 self.compound(compound, depth);
+                self.group_redirects(redirects.as_ref(), depth);
                 None
             }
             Command::Function(function) => {
                 self.compound(&function.body.0, depth);
+                self.group_redirects(function.body.1.as_ref(), depth);
                 None
             }
             Command::ExtendedTest(..) => None,
+        }
+    }
+
+    /// Redirects on `{ ...; } > file` apply to everything inside; the null
+    /// command carries them so they get the same checks as a simple command's.
+    fn group_redirects(&mut self, redirects: Option<&RedirectList>, depth: usize) {
+        let Some(list) = redirects else { return };
+        let redirects: Vec<Redirect> = list
+            .0
+            .iter()
+            .filter_map(|r| self.redirect(r, depth))
+            .collect();
+        if !redirects.is_empty() {
+            self.analysis
+                .commands
+                .push(Invocation::new(&[":".to_string()], &redirects));
         }
     }
 
@@ -358,13 +376,16 @@ impl Walker {
                     IoFileRedirectKind::DuplicateOutput => ">&",
                 };
                 let target = self.expand(&word.value, depth).fields.join(" ");
-                let writes = matches!(
-                    kind,
+                // `>& word` writes a file unless word is a descriptor number or `-`.
+                let duplicates_fd = target == "-" || target.bytes().all(|b| b.is_ascii_digit());
+                let writes = match kind {
                     IoFileRedirectKind::Write
-                        | IoFileRedirectKind::Clobber
-                        | IoFileRedirectKind::Append
-                        | IoFileRedirectKind::ReadAndWrite
-                )
+                    | IoFileRedirectKind::Clobber
+                    | IoFileRedirectKind::Append
+                    | IoFileRedirectKind::ReadAndWrite => true,
+                    IoFileRedirectKind::DuplicateOutput => !duplicates_fd,
+                    IoFileRedirectKind::Read | IoFileRedirectKind::DuplicateInput => false,
+                }
                 .then(|| target.clone());
                 Some(Redirect {
                     text: format!("{op} {target}"),
@@ -380,6 +401,18 @@ impl Walker {
                 Some(Redirect {
                     text: format!("<<< {text}"),
                     writes: None,
+                })
+            }
+            IoRedirect::File(
+                _,
+                IoFileRedirectKind::DuplicateOutput,
+                IoFileRedirectTarget::Duplicate(word),
+            ) => {
+                let target = self.expand(&word.value, depth).fields.join(" ");
+                let duplicates_fd = target == "-" || target.bytes().all(|b| b.is_ascii_digit());
+                (!duplicates_fd).then(|| Redirect {
+                    text: format!(">& {target}"),
+                    writes: Some(target),
                 })
             }
             IoRedirect::File(..) => None,

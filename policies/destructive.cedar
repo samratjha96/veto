@@ -33,15 +33,18 @@ forbid (
 };
 
 @id("forbid-delete-credential-dir")
-@description("Block deleting the SSH, GnuPG or AWS credential directories.")
+@description("Block deleting the SSH, GnuPG or AWS credential directories or their contents.")
 forbid (
     principal,
     action == Action::"FileDelete",
     resource
 ) when {
     context.path like "*/.ssh" ||
+    context.path like "*/.ssh/*" ||
     context.path like "*/.gnupg" ||
-    context.path like "*/.aws"
+    context.path like "*/.gnupg/*" ||
+    context.path like "*/.aws" ||
+    context.path like "*/.aws/*"
 };
 
 @id("forbid-delete-git-dir")

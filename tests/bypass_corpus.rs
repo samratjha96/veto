@@ -215,6 +215,15 @@ const CASES: &[Case] = &[
     ),
     bash("shell-wrapper", "bash <<'EOF'\nrm -rf /\nEOF", true),
     bash("shell-file-write", "echo x &> ~/.bashrc", true),
+    bash("shell-file-write", "echo x >& ~/.bashrc", true),
+    bash("shell-file-write", "{ echo x; } > ~/.bashrc", true),
+    bash("shell-wrapper", "{ bash; } <<'EOF'\nrm -rf /\nEOF", true),
+    bash(
+        "quote-splitting",
+        "git -c core.pager='r''m -rf ~' log | cat",
+        true,
+    ),
+    bash("direct", "rm -rf ~/.ssh/*", true),
     bash("direct", "docker system prune -af", true),
     bash(
         "alt-spelling",
