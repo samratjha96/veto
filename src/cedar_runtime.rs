@@ -1,6 +1,7 @@
 //! Load Cedar schema/policies and evaluate requests — stateless, no entity store.
 
 use crate::hook::HookKind;
+use crate::shell::Invocation;
 use crate::signature::SignatureContext;
 use anyhow::{Context, Result};
 use cedar_policy::{
@@ -145,6 +146,7 @@ impl CedarRuntime {
         payload: &Value,
         sig: &SignatureContext,
         process_ctx: Option<(bool, i64)>,
+        invocation: Option<&Invocation>,
     ) -> Result<CedarDecision> {
         let inner = self.inner.read().map_err(|e| anyhow::anyhow!("{e}"))?;
 
@@ -156,11 +158,13 @@ impl CedarRuntime {
         // Build context based on action type
         let context_json = match action_str {
             "ShellCommand" => {
-                let command = payload
-                    .get("tool_input")
-                    .and_then(|i| i.get("command"))
-                    .and_then(|c| c.as_str())
-                    .unwrap_or("");
+                let command = invocation.map(|i| i.text.as_str()).unwrap_or_else(|| {
+                    payload
+                        .get("tool_input")
+                        .and_then(|i| i.get("command"))
+                        .and_then(|c| c.as_str())
+                        .unwrap_or("")
+                });
                 let working_dir = payload
                     .get("tool_input")
                     .and_then(|i| {
@@ -172,6 +176,9 @@ impl CedarRuntime {
                 let (has_long, longest) = process_ctx.unwrap_or((false, 0));
                 json!({
                     "command": command,
+                    "program": invocation.map_or("", |i| i.program.as_str()),
+                    "subcommand": invocation.map_or("", |i| i.subcommand.as_str()),
+                    "flags": invocation.map_or(&[][..], |i| i.flags.as_slice()),
                     "working_dir": working_dir,
                     "signature": signature_json(sig),
                     "has_long_running_process": has_long,
@@ -282,7 +289,7 @@ mod tests {
         });
         let sig = SignatureContext::default();
         let decision = rt
-            .evaluate(&HookKind::BeforeTool, Some("Bash"), &payload, &sig, None)
+            .evaluate(&HookKind::BeforeTool, Some("Bash"), &payload, &sig, None, None)
             .unwrap();
         assert!(decision.allowed, "safe command should be allowed");
     }
@@ -296,7 +303,7 @@ mod tests {
         });
         let sig = SignatureContext::default();
         let decision = rt
-            .evaluate(&HookKind::BeforeTool, Some("Bash"), &payload, &sig, None)
+            .evaluate(&HookKind::BeforeTool, Some("Bash"), &payload, &sig, None, None)
             .unwrap();
         assert!(!decision.allowed, "rm -rf / should be denied");
     }
@@ -309,8 +316,16 @@ mod tests {
             "tool_input": {"command": "git push --force origin main"}
         });
         let sig = SignatureContext::default();
+        let analysis = crate::shell::analyze("git push --force origin main");
         let decision = rt
-            .evaluate(&HookKind::BeforeTool, Some("Bash"), &payload, &sig, None)
+            .evaluate(
+                &HookKind::BeforeTool,
+                Some("Bash"),
+                &payload,
+                &sig,
+                None,
+                analysis.commands.first(),
+            )
             .unwrap();
         assert!(!decision.allowed, "git push --force should be denied");
     }
@@ -325,7 +340,7 @@ mod tests {
         let mut sig = SignatureContext::default();
         sig.severity = crate::signature::Severity::Critical;
         let decision = rt
-            .evaluate(&HookKind::BeforeTool, Some("Bash"), &payload, &sig, None)
+            .evaluate(&HookKind::BeforeTool, Some("Bash"), &payload, &sig, None, None)
             .unwrap();
         assert!(!decision.allowed, "critical YARA severity should deny");
     }

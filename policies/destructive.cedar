@@ -96,10 +96,23 @@ forbid (
     action == Action::"ShellCommand",
     resource
 ) when {
-    context.command like "*git push --force*" ||
-    context.command like "*git push -f *" ||
-    context.command like "*git push * --force*" ||
-    context.command like "*git push * -f *"
+    context.program == "git" &&
+    context.subcommand == "push" &&
+    (context.flags.contains("force") ||
+     context.flags.contains("force-with-lease") ||
+     context.flags.contains("force-if-includes"))
+};
+
+@id("ask-git-push-delete")
+@description("Confirm before deleting a remote ref.")
+forbid (
+    principal,
+    action == Action::"ShellCommand",
+    resource
+) when {
+    context.program == "git" &&
+    context.subcommand == "push" &&
+    context.flags.contains("delete")
 };
 
 @id("forbid-git-reset-hard")
