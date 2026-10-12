@@ -147,10 +147,14 @@ rule destructive_filesystem_disk {
 
     strings:
         $f1 = /mkfs\./ nocase
-        $f2 = /\bdd\s+if=/ nocase
+        // Writes to a disk device, by dd or by redirect. Same device names as
+        // forbid-write-block-device in policies/destructive.cedar.
+        $f2 = /(\bdd\b[^\n;|&]*\s["']?of=|>\s*)["']?\/dev\/(sd|hd|vd|xvd|nvme|mmcblk|disk|rdisk)/ nocase
         $f3 = /shred\s+-/ nocase
-        $f4 = "rm -rf /" nocase
-        $f5 = "rm -fr /" nocase
+        // Recursive removal of the root itself, not of every absolute path.
+        $f4 = /\brm\s+((-[a-z]+|--[a-z-]*)\s+)*(-[a-z]*r[a-z]*|--recursive)\s+((-[a-z]+|--[a-z-]*)\s+)*["']?\/([^A-Za-z0-9._~-]|$)/ nocase
+        // dd to a target only known at run time.
+        $f5 = /\bdd\b[^\n;|&]*\s["']?of=["']?\$/ nocase
         $f6 = /chmod\s+-R\s+777\s+\// nocase
 
     condition:
@@ -197,7 +201,6 @@ rule destructive_dev_null_redirect {
         category = "destructive_ops"
 
     strings:
-        $d1 = />\s*\/dev\/null\s+2>&1/ nocase
         $d2 = /cp\s+\/dev\/null\s+/ nocase
         $d3 = /cat\s+\/dev\/null\s*>\s*/ nocase
 

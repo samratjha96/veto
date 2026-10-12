@@ -255,8 +255,7 @@ const CASES: &[Case] = &[
     benign("cat README.md", true),
     benign("rm build/output.o", true),
     benign("rm .git/index.lock", true),
-    // destructive_ops.yar flags every `dd if=`.
-    benign("dd if=/dev/zero of=/dev/null count=1", false),
+    benign("dd if=/dev/zero of=/dev/null count=1", true),
     benign("echo x > /dev/null", true),
     benign("chmod -R 755 dir", true),
     benign("git -c color.ui=always log", true),

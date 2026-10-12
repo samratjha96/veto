@@ -77,8 +77,12 @@ rule command_injection_reverse_shell {
     strings:
         $bash_tcp = "/dev/tcp/" nocase
         $bash_udp = "/dev/udp/" nocase
-        $nc_listen = /nc.*-[a-z]*l.*-[a-z]*p/ nocase
-        $nc_exec = /nc.*-[a-z]*e/ nocase
+        // netcat must be the command itself, not "nc" inside rsync or sync, and its
+        // flags must be in the same simple command. Flags are case-sensitive:
+        // -c runs a program, -C only sends CRLF.
+        $nc_exec = /\b(nc|ncat|netcat)\b[^\n;|&]*\s(-[a-z]*[ec]|--(sh-)?exec)\b/
+        $nc_listen_lp = /\b(nc|ncat|netcat)\b[^\n;|&]*\s-[a-z]*l[a-z]*([^\n;|&]*\s-)?[a-z]*p/
+        $nc_listen_pl = /\b(nc|ncat|netcat)\b[^\n;|&]*\s-[a-z]*p[a-z]*([^\n;|&]*\s-)?[a-z]*l/
 
     condition:
         any of them
