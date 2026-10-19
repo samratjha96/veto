@@ -25,6 +25,28 @@ pub struct CedarRuntime {
     policy_dir: std::path::PathBuf,
 }
 
+/// One Cedar request as it was evaluated: the action and the context record.
+/// Stored in the audit log so later policies can be replayed against it.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct RecordedRequest {
+    pub action: String,
+    pub context: Value,
+}
+
+/// Candidate forbid policies, checked together against recorded requests.
+pub struct Probe {
+    policies: PolicySet,
+    entities: Entities,
+    /// Policy ids, in the order they were given.
+    pub ids: Vec<String>,
+}
+
+/// A recorded request converted once, so many probes can be checked against it.
+pub struct PreparedRequest {
+    pub action: String,
+    request: Request,
+}
+
 /// Result of a Cedar evaluation.
 pub struct CedarDecision {
     pub allowed: bool,
@@ -164,15 +186,20 @@ impl CedarRuntime {
         process_ctx: Option<(bool, i64)>,
         invocation: Option<&Invocation>,
     ) -> Result<CedarDecision> {
-        let inner = self.inner.read().map_err(|e| anyhow::anyhow!("{e}"))?;
+        let action = kind.cedar_action(tool_name);
+        let context = Self::request_context(action, payload, sig, process_ctx, invocation);
+        self.evaluate_context(action, &context)
+    }
 
-        let action_str = kind.cedar_action(tool_name);
-        let action_uid = euid("Action", action_str)?;
-        let principal_uid = euid("Agent", "claude")?;
-        let resource_uid = euid("Resource", "default")?;
-
-        // Build context based on action type
-        let context_json = match action_str {
+    /// The context record Cedar evaluates for an action, built from a hook payload.
+    pub fn request_context(
+        action_str: &str,
+        payload: &Value,
+        sig: &SignatureContext,
+        process_ctx: Option<(bool, i64)>,
+        invocation: Option<&Invocation>,
+    ) -> Value {
+        match action_str {
             "ShellCommand" => {
                 let command = invocation.map(|i| i.text.as_str()).unwrap_or_else(|| {
                     payload
@@ -230,39 +257,17 @@ impl CedarRuntime {
                     "longest_process_runtime_seconds": 0,
                 })
             }
-        };
+        }
+    }
 
-        let context =
-            CedarContext::from_json_value(context_json, Some((&inner.schema, &action_uid)))?;
-
-        // Build inline entities (Agent + Resource)
-        let mut agent_attrs = std::collections::HashMap::new();
-        agent_attrs.insert(
-            "provider_id".to_string(),
-            cedar_policy::RestrictedExpression::new_string("claude".to_string()),
-        );
-        let agent_entity = Entity::new(
-            principal_uid.clone(),
-            agent_attrs,
-            std::collections::HashSet::new(),
-        )?;
-        let resource_entity =
-            Entity::new_no_attrs(resource_uid.clone(), std::collections::HashSet::new());
-        let entities =
-            Entities::from_entities([agent_entity, resource_entity], Some(&inner.schema))?;
-
-        let request = Request::new(
-            principal_uid,
-            action_uid,
-            resource_uid,
-            context,
-            Some(&inner.schema),
-        )?;
-
+    /// Evaluate a recorded request against the loaded policies.
+    pub fn evaluate_context(&self, action: &str, context: &Value) -> Result<CedarDecision> {
+        let inner = self.inner.read().map_err(|e| anyhow::anyhow!("{e}"))?;
+        let request = request_for(Some(&inner.schema), action, context)?;
+        let entities = entities_for(&inner.schema)?;
         let response = self
             .authorizer
             .is_authorized(&request, &inner.policy_set, &entities);
-
         let allowed = matches!(response.decision(), cedar_policy::Decision::Allow);
         let deny_reasons: Vec<String> = response
             .diagnostics()
@@ -277,6 +282,114 @@ impl CedarRuntime {
             policy_id,
         })
     }
+
+    /// Parse forbid policies, one per text, and validate them against the
+    /// schema, ready to replay.
+    pub fn probe(&self, cedar_texts: &[&str]) -> Result<Probe> {
+        let inner = self.inner.read().map_err(|e| anyhow::anyhow!("{e}"))?;
+        let mut set = PolicySet::new();
+        let mut ids = Vec::new();
+        for text in cedar_texts {
+            let parsed: PolicySet = text.parse().context("parse policy")?;
+            let mut policies = parsed.policies();
+            let policy = policies.next().context("no policy in text")?;
+            anyhow::ensure!(policies.next().is_none(), "expected one policy per text");
+            anyhow::ensure!(
+                policy.effect() == cedar_policy::Effect::Forbid,
+                "only forbid policies can be replayed"
+            );
+            let id = policy
+                .annotation("id")
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| policy.id().as_ref())
+                .to_string();
+            set.add(policy.new_id(PolicyId::new(&id)))
+                .with_context(|| format!("duplicate policy id {id}"))?;
+            ids.push(id);
+        }
+
+        // Beside a permit-all, a request is denied by exactly the probes that forbid it.
+        let permit: cedar_policy::Policy = "permit(principal, action, resource);".parse()?;
+        set.add(permit.new_id(PolicyId::new("replay-permit-all")))?;
+
+        let validation = cedar_policy::Validator::new(inner.schema.clone())
+            .validate(&set, cedar_policy::ValidationMode::Strict);
+        if !validation.validation_passed() {
+            let errors: Vec<String> = validation
+                .validation_errors()
+                .map(|e| e.to_string())
+                .collect();
+            anyhow::bail!("policy does not validate: {}", errors.join("; "));
+        }
+        let entities = entities_for(&inner.schema)?;
+        Ok(Probe {
+            policies: set,
+            entities,
+            ids,
+        })
+    }
+
+    /// Convert a recorded request for replay. Probes are validated against the
+    /// schema and the context came from `request_context`, so the request skips
+    /// validation: that is most of the cost, and it lets records from before a
+    /// schema change replay, firing only if every field a probe reads is there.
+    pub fn prepare(&self, recorded: &RecordedRequest) -> Result<PreparedRequest> {
+        Ok(PreparedRequest {
+            action: recorded.action.clone(),
+            request: request_for(None, &recorded.action, &recorded.context)?,
+        })
+    }
+
+    /// Indexes into `probe.ids` of the probes that forbid a prepared request.
+    pub fn probe_fires(&self, probe: &Probe, request: &PreparedRequest) -> Vec<usize> {
+        let response =
+            self.authorizer
+                .is_authorized(&request.request, &probe.policies, &probe.entities);
+        response
+            .diagnostics()
+            .reason()
+            .filter_map(|fired| {
+                let fired: &str = fired.as_ref();
+                probe.ids.iter().position(|id| id == fired)
+            })
+            .collect()
+    }
+}
+
+fn request_for(schema: Option<&Schema>, action: &str, context: &Value) -> Result<Request> {
+    let action_uid = euid("Action", action)?;
+    let principal_uid = euid("Agent", "claude")?;
+    let resource_uid = euid("Resource", "default")?;
+    let context = CedarContext::from_json_value(context.clone(), schema.map(|s| (s, &action_uid)))?;
+    Ok(Request::new(
+        principal_uid,
+        action_uid,
+        resource_uid,
+        context,
+        schema,
+    )?)
+}
+
+/// The inline entities every request names: the agent and the resource.
+fn entities_for(schema: &Schema) -> Result<Entities> {
+    let mut agent_attrs = std::collections::HashMap::new();
+    agent_attrs.insert(
+        "provider_id".to_string(),
+        cedar_policy::RestrictedExpression::new_string("claude".to_string()),
+    );
+    let agent_entity = Entity::new(
+        euid("Agent", "claude")?,
+        agent_attrs,
+        std::collections::HashSet::new(),
+    )?;
+    let resource_entity = Entity::new_no_attrs(
+        euid("Resource", "default")?,
+        std::collections::HashSet::new(),
+    );
+    Ok(Entities::from_entities(
+        [agent_entity, resource_entity],
+        Some(schema),
+    )?)
 }
 
 #[cfg(test)]

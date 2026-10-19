@@ -18,6 +18,43 @@ pub struct AuditEvent {
     pub policy_id: Option<String>,
     pub yara_categories: Option<String>,
     pub yara_severity: Option<String>,
+    pub session_id: Option<String>,
+    /// The Cedar requests behind the decision, as JSON; read by policy replay.
+    #[serde(skip_serializing)]
+    pub requests: Option<String>,
+}
+
+/// A decision to record. Callers that only have a summary leave the rest empty.
+#[derive(Default)]
+pub struct NewEvent<'a> {
+    pub hook_type: &'a str,
+    pub tool_name: Option<&'a str>,
+    pub action_summary: Option<&'a str>,
+    pub decision: &'a str,
+    pub policy_id: Option<&'a str>,
+    pub yara_categories: Option<&'a str>,
+    pub yara_severity: Option<&'a str>,
+    pub session_id: Option<&'a str>,
+    pub requests: Option<&'a str>,
+}
+
+const COLUMNS: &str = "id, timestamp, hook_type, tool_name, action_summary, decision, \
+     policy_id, yara_categories, yara_severity, session_id, requests";
+
+fn event_from_row(row: &rusqlite::Row) -> rusqlite::Result<AuditEvent> {
+    Ok(AuditEvent {
+        id: row.get(0)?,
+        timestamp: row.get(1)?,
+        hook_type: row.get(2)?,
+        tool_name: row.get(3)?,
+        action_summary: row.get(4)?,
+        decision: row.get(5)?,
+        policy_id: row.get(6)?,
+        yara_categories: row.get(7)?,
+        yara_severity: row.get(8)?,
+        session_id: row.get(9)?,
+        requests: row.get(10)?,
+    })
 }
 
 pub struct AuditLog {
@@ -44,10 +81,22 @@ impl AuditLog {
                 decision TEXT NOT NULL,
                 policy_id TEXT,
                 yara_categories TEXT,
-                yara_severity TEXT
+                yara_severity TEXT,
+                session_id TEXT,
+                requests TEXT
             );",
         )
         .context("create events table")?;
+        // Logs created before these columns existed gain them in place.
+        for column in ["session_id", "requests"] {
+            let exists = conn
+                .prepare("SELECT 1 FROM pragma_table_info('events') WHERE name = ?1")?
+                .exists([column])?;
+            if !exists {
+                conn.execute_batch(&format!("ALTER TABLE events ADD COLUMN {column} TEXT;"))
+                    .with_context(|| format!("add {column} column"))?;
+            }
+        }
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -63,22 +112,65 @@ impl AuditLog {
         yara_categories: Option<&str>,
         yara_severity: Option<&str>,
     ) -> Result<()> {
+        self.log(&NewEvent {
+            hook_type,
+            tool_name,
+            action_summary,
+            decision,
+            policy_id,
+            yara_categories,
+            yara_severity,
+            ..NewEvent::default()
+        })
+    }
+
+    pub fn log(&self, event: &NewEvent) -> Result<()> {
         let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("{e}"))?;
         conn.execute(
-            "INSERT INTO events (hook_type, tool_name, action_summary, decision, policy_id, yara_categories, yara_severity)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO events (hook_type, tool_name, action_summary, decision, policy_id, \
+             yara_categories, yara_severity, session_id, requests)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             rusqlite::params![
-                hook_type,
-                tool_name,
-                action_summary,
-                decision,
-                policy_id,
-                yara_categories,
-                yara_severity,
+                event.hook_type,
+                event.tool_name,
+                event.action_summary,
+                event.decision,
+                event.policy_id,
+                event.yara_categories,
+                event.yara_severity,
+                event.session_id,
+                event.requests,
             ],
         )
         .context("insert audit event")?;
         Ok(())
+    }
+
+    /// One event by id.
+    pub fn event(&self, id: i64) -> Result<Option<AuditEvent>> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("{e}"))?;
+        let mut stmt = conn
+            .prepare(&format!("SELECT {COLUMNS} FROM events WHERE id = ?1"))
+            .context("prepare event query")?;
+        let mut rows = stmt
+            .query_map([id], event_from_row)
+            .context("query event")?;
+        rows.next().transpose().context("read event row")
+    }
+
+    /// The most recent events that recorded their Cedar requests, newest first.
+    pub fn replayable_events(&self, limit: usize) -> Result<Vec<AuditEvent>> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("{e}"))?;
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT {COLUMNS} FROM events WHERE requests IS NOT NULL ORDER BY id DESC LIMIT ?1"
+            ))
+            .context("prepare replay query")?;
+        let rows = stmt
+            .query_map([limit as i64], event_from_row)
+            .context("query replayable events")?;
+        rows.collect::<rusqlite::Result<_>>()
+            .context("read event rows")
     }
 
     pub fn event_count(&self) -> Result<i64> {
@@ -110,10 +202,7 @@ impl AuditLog {
     ) -> Result<Vec<AuditEvent>> {
         let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("{e}"))?;
 
-        let mut sql = String::from(
-            "SELECT id, timestamp, hook_type, tool_name, action_summary, \
-             decision, policy_id, yara_categories, yara_severity FROM events",
-        );
+        let mut sql = format!("SELECT {COLUMNS} FROM events");
         let mut conditions = Vec::new();
         let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
@@ -140,19 +229,7 @@ impl AuditLog {
         let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
         let mut stmt = conn.prepare(&sql).context("prepare query")?;
         let rows = stmt
-            .query_map(param_refs.as_slice(), |row| {
-                Ok(AuditEvent {
-                    id: row.get(0)?,
-                    timestamp: row.get(1)?,
-                    hook_type: row.get(2)?,
-                    tool_name: row.get(3)?,
-                    action_summary: row.get(4)?,
-                    decision: row.get(5)?,
-                    policy_id: row.get(6)?,
-                    yara_categories: row.get(7)?,
-                    yara_severity: row.get(8)?,
-                })
-            })
+            .query_map(param_refs.as_slice(), event_from_row)
             .context("query events")?;
 
         let mut events = Vec::new();
@@ -191,6 +268,44 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         let log = AuditLog::open(&path).unwrap();
         (log, path)
+    }
+
+    #[test]
+    fn older_logs_gain_the_replay_columns() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+                    hook_type TEXT NOT NULL, tool_name TEXT, action_summary TEXT,
+                    decision TEXT NOT NULL, policy_id TEXT, yara_categories TEXT,
+                    yara_severity TEXT
+                );
+                INSERT INTO events (hook_type, decision) VALUES ('pre-tool-use', 'allow');",
+            )
+            .unwrap();
+        }
+        let log = AuditLog::open(&path).unwrap();
+        log.log(&NewEvent {
+            hook_type: "pre-tool-use",
+            decision: "deny",
+            session_id: Some("s1"),
+            requests: Some("[]"),
+            ..NewEvent::default()
+        })
+        .unwrap();
+
+        let old = log.event(1).unwrap().unwrap();
+        assert_eq!((old.session_id, old.requests), (None, None));
+        let replayable = log.replayable_events(10).unwrap();
+        assert_eq!(replayable.len(), 1);
+        assert_eq!(replayable[0].session_id.as_deref(), Some("s1"));
+        assert_eq!(replayable[0].requests.as_deref(), Some("[]"));
+        // Reopening an already migrated log is a no-op.
+        AuditLog::open(&path).unwrap();
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! Core adjudication pipeline: YARA scan → Cedar eval → Verdict.
 
 use crate::adapters::claude::payload;
-use crate::cedar_runtime::{CedarDecision, CedarRuntime};
+use crate::cedar_runtime::{CedarDecision, CedarRuntime, RecordedRequest};
 use crate::hook::{HookKind, Verdict};
 use crate::process_context;
 use crate::shell;
@@ -15,6 +15,8 @@ pub struct AdjudicationResult {
     pub sig: SignatureContext,
     /// The text that was scanned (command, path, url, etc.) — useful for audit.
     pub scan_text: String,
+    /// Every Cedar request evaluated for this event, so policies can be replayed later.
+    pub requests: Vec<RecordedRequest>,
 }
 
 /// Run the full adjudication pipeline for a hook event.
@@ -56,6 +58,21 @@ pub fn adjudicate(
 
     // 4. Cedar evaluation. A shell command is judged as the shell would run it,
     // one simple command at a time, so quoting and wrappers cannot hide it.
+    let mut requests = Vec::new();
+    let mut evaluate = |tool: Option<&str>,
+                        event: &Value,
+                        process: Option<(bool, i64)>,
+                        invocation: Option<&shell::Invocation>|
+     -> Result<CedarDecision> {
+        let action = kind.cedar_action(tool);
+        let context = CedarRuntime::request_context(action, event, &sig, process, invocation);
+        let decision = cedar.evaluate_context(action, &context)?;
+        requests.push(RecordedRequest {
+            action: action.to_string(),
+            context,
+        });
+        Ok(decision)
+    };
     let cedar_decision = match &shell_analysis {
         Some(analysis) if !analysis.commands.is_empty() => {
             let mut combined = CedarDecision {
@@ -64,11 +81,9 @@ pub fn adjudicate(
                 policy_id: None,
             };
             for command in &analysis.commands {
-                let decision = cedar.evaluate(
-                    kind,
+                let decision = evaluate(
                     tool_name.as_deref(),
                     hook_payload,
-                    &sig,
                     process_ctx,
                     Some(command),
                 )?;
@@ -82,27 +97,14 @@ pub fn adjudicate(
                     if let Some(cwd) = hook_payload.get("cwd") {
                         file_payload["cwd"] = cwd.clone();
                     }
-                    let decision = cedar.evaluate(
-                        kind,
-                        Some(effect.kind.tool_name()),
-                        &file_payload,
-                        &sig,
-                        None,
-                        None,
-                    )?;
+                    let decision =
+                        evaluate(Some(effect.kind.tool_name()), &file_payload, None, None)?;
                     combined.merge(decision);
                 }
             }
             combined
         }
-        _ => cedar.evaluate(
-            kind,
-            tool_name.as_deref(),
-            hook_payload,
-            &sig,
-            process_ctx,
-            None,
-        )?,
+        _ => evaluate(tool_name.as_deref(), hook_payload, process_ctx, None)?,
     };
     let unresolved = shell_analysis.map(|a| a.unresolved).unwrap_or_default();
 
@@ -138,6 +140,7 @@ pub fn adjudicate(
         verdict,
         sig,
         scan_text,
+        requests,
     })
 }
 
@@ -199,6 +202,44 @@ mod tests {
         });
         let result = adjudicate(&HookKind::BeforeTool, &payload, &cedar).unwrap();
         assert!(matches!(result.verdict, Verdict::Deny { .. }));
+    }
+
+    #[test]
+    fn records_every_request_it_evaluates() {
+        let cedar = test_cedar();
+        let payload = json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "rm -rf build && git status"},
+            "cwd": "/repo"
+        });
+        let result = adjudicate(&HookKind::BeforeTool, &payload, &cedar).unwrap();
+        let recorded: Vec<(&str, &str)> = result
+            .requests
+            .iter()
+            .map(|r| {
+                let field = if r.action == "ShellCommand" {
+                    "program"
+                } else {
+                    "path"
+                };
+                (r.action.as_str(), r.context[field].as_str().unwrap())
+            })
+            .collect();
+        assert_eq!(
+            recorded,
+            [
+                ("ShellCommand", "rm"),
+                ("FileDelete", "/repo/build"),
+                ("ShellCommand", "git")
+            ]
+        );
+        for request in &result.requests {
+            let replayed = cedar.evaluate_context(&request.action, &request.context);
+            assert!(
+                replayed.is_ok(),
+                "recorded context must replay: {request:?}"
+            );
+        }
     }
 
     #[test]

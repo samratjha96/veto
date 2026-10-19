@@ -66,19 +66,21 @@ pub fn handle_request(
                         _ => None,
                     };
 
-                    let _ = audit.log_event(
+                    let session_id = request.payload.get("session_id").and_then(|s| s.as_str());
+                    let requests = (!result.requests.is_empty())
+                        .then(|| serde_json::to_string(&result.requests).ok())
+                        .flatten();
+                    let _ = audit.log(&crate::audit::NewEvent {
                         hook_type,
-                        tool_name.as_deref(),
-                        summary,
-                        result.verdict.as_str(),
+                        tool_name: tool_name.as_deref(),
+                        action_summary: summary,
+                        decision: result.verdict.as_str(),
                         policy_id,
-                        if categories.is_empty() {
-                            None
-                        } else {
-                            Some(&cats_str)
-                        },
-                        Some(&sev_str),
-                    );
+                        yara_categories: (!categories.is_empty()).then_some(cats_str.as_str()),
+                        yara_severity: Some(&sev_str),
+                        session_id,
+                        requests: requests.as_deref(),
+                    });
 
                     let hook_response = claude_response::encode(&result.verdict, hook_type);
                     AdjudicateOk::success(hook_response)

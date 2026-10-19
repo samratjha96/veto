@@ -17,5 +17,6 @@ pub mod signature;
 pub mod server;
 pub mod setup;
 pub mod shell;
+pub mod suggest;
 pub mod templates;
 pub mod watcher;

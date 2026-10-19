@@ -8,7 +8,7 @@ use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use veto::adjudicate;
 use veto::audit::AuditLog;
-use veto::cedar_runtime::CedarRuntime;
+use veto::cedar_runtime::{CedarRuntime, RecordedRequest};
 use veto::hook::HookKind;
 use veto::ipc::{self, AdjudicateOk};
 
@@ -139,6 +139,35 @@ enum PolicyCommands {
     Template {
         #[command(subcommand)]
         command: TemplateCommands,
+    },
+    /// Suggest policies from an audit event or a command, with replay counts
+    Suggest {
+        /// Audit event id (from `veto audit`)
+        event: Option<i64>,
+        /// Shell command to suggest from instead of an audit event
+        #[arg(long)]
+        command: Option<String>,
+        /// Tool for --command, --path or --url: Bash, Write, Edit, Read, Delete, WebFetch
+        #[arg(long, default_value = "Bash")]
+        tool: String,
+        /// File path (for Write/Edit/Read/Delete)
+        #[arg(long)]
+        path: Option<String>,
+        /// URL (for WebFetch)
+        #[arg(long)]
+        url: Option<String>,
+        /// Which command of a compound event to suggest for (default: the one a policy stopped)
+        #[arg(long)]
+        part: Option<usize>,
+        /// Suggest denying instead of asking
+        #[arg(long)]
+        deny: bool,
+        /// How many recent audit events to replay against
+        #[arg(long, default_value = "10000")]
+        history: usize,
+        /// Write suggestion N from the list into the policy directory
+        #[arg(long)]
+        apply: Option<usize>,
     },
 }
 
@@ -321,6 +350,26 @@ fn main() -> Result<()> {
                     handle_template_apply(&id, &socket)?;
                 }
             },
+            PolicyCommands::Suggest {
+                event,
+                command,
+                tool,
+                path,
+                url,
+                part,
+                deny,
+                history,
+                apply,
+            } => {
+                let source = match event {
+                    Some(id) => SuggestSource::Event(id),
+                    None if command.is_none() && path.is_none() && url.is_none() => {
+                        bail!("give an audit event id, or --command, --path or --url")
+                    }
+                    None => SuggestSource::Payload(test_payload(command, &tool, path, url)?),
+                };
+                handle_policy_suggest(source, part, deny, history, apply, &socket)?;
+            }
         },
         Commands::Setup { print } => {
             handle_setup(print)?;
@@ -563,6 +612,170 @@ fn handle_policy_remove(name: &str, socket: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
+enum SuggestSource {
+    Event(i64),
+    Payload(serde_json::Value),
+}
+
+fn handle_policy_suggest(
+    source: SuggestSource,
+    part: Option<usize>,
+    deny: bool,
+    history: usize,
+    apply: Option<usize>,
+    socket: &std::path::Path,
+) -> Result<()> {
+    let dir = policy_dir();
+    let cedar = CedarRuntime::load(&dir)
+        .with_context(|| format!("load policies from {}", dir.display()))?;
+    let db = db_path();
+    let audit = db.exists().then(|| AuditLog::open(&db)).transpose()?;
+
+    let (requests, source_id, summary) = match source {
+        SuggestSource::Event(id) => {
+            let log = audit
+                .as_ref()
+                .with_context(|| format!("no audit log at {}", db.display()))?;
+            let event = log
+                .event(id)?
+                .with_context(|| format!("no audit event {id}"))?;
+            let raw = event.requests.as_deref().with_context(|| {
+                format!("event {id} was recorded before Veto kept the fields it evaluated")
+            })?;
+            let requests: Vec<RecordedRequest> =
+                serde_json::from_str(raw).context("read recorded requests")?;
+            let what = event.action_summary.unwrap_or_default();
+            (requests, Some(id), format!("audit event {id}: {what}"))
+        }
+        SuggestSource::Payload(payload) => {
+            let result = adjudicate::adjudicate(&HookKind::BeforeTool, &payload, &cedar)?;
+            (result.requests, None, result.scan_text)
+        }
+    };
+
+    // A compound command gets rungs for one of its commands: the one a policy
+    // stopped if any, else the first.
+    let parts = veto::suggest::parts(&requests);
+    let stopped = |part: &Vec<RecordedRequest>| {
+        part.iter().any(|r| {
+            cedar
+                .evaluate_context(&r.action, &r.context)
+                .is_ok_and(|d| !d.allowed)
+        })
+    };
+    let chosen = match part {
+        Some(n) => n
+            .checked_sub(1)
+            .filter(|&i| i < parts.len())
+            .with_context(|| format!("no part {n}; the event has {}", parts.len()))?,
+        None => parts.iter().position(stopped).unwrap_or(0),
+    };
+    let requests = parts.get(chosen).cloned().unwrap_or_default();
+
+    let mut ladder: Vec<veto::suggest::Candidate> = Vec::new();
+    for request in &requests {
+        for candidate in veto::suggest::candidates(request, deny) {
+            if !ladder.iter().any(|c| c.id == candidate.id) {
+                ladder.push(candidate);
+            }
+        }
+    }
+    if ladder.is_empty() {
+        bail!("nothing to suggest: no field of this event can be matched by a policy");
+    }
+
+    if let Some(n) = apply {
+        let candidate = ladder
+            .get(n.wrapping_sub(1))
+            .with_context(|| format!("no suggestion {n}; there are {}", ladder.len()))?;
+        cedar.probe(&[&candidate.cedar])?;
+        let path = dir.join(format!("{}.cedar", candidate.id));
+        if path.exists() {
+            bail!("{} already exists", path.display());
+        }
+        std::fs::write(&path, &candidate.cedar)
+            .with_context(|| format!("write {}", path.display()))?;
+        eprintln!("{}", candidate.cedar);
+        eprintln!("Wrote {}", path.display());
+
+        // Try to reload server
+        let request = json!({"hook": "reload", "payload": {}});
+        let request_bytes = serde_json::to_vec(&request)?;
+        match send_request(socket, &request_bytes) {
+            Ok(resp) if resp.ok => {
+                if let Some(data) = resp.data {
+                    let count = data["policy_count"].as_i64().unwrap_or(0);
+                    eprintln!("Server reloaded: {count} policies active");
+                }
+            }
+            Ok(_) | Err(_) => {
+                eprintln!("Note: could not reload server (file watcher will pick up the change)");
+            }
+        }
+        return Ok(());
+    }
+
+    let events = match &audit {
+        Some(log) => log.replayable_events(history)?,
+        None => Vec::new(),
+    };
+    let replays = veto::suggest::replay(&cedar, &ladder, &requests, source_id, &events)?;
+
+    println!("From {}", first_line(&summary));
+    if parts.len() > 1 {
+        println!(
+            "It ran {} commands; suggesting for {} (pick another with --part N):",
+            parts.len(),
+            chosen + 1
+        );
+        for (i, p) in parts.iter().enumerate() {
+            let text = p[0].context["command"].as_str().unwrap_or(&p[0].action);
+            println!(
+                "  {}{}. {}",
+                if i == chosen { ">" } else { " " },
+                i + 1,
+                first_line(text)
+            );
+        }
+    }
+    let (replayed, skipped) = replays.first().map_or((0, 0), |r| (r.replayed, r.skipped));
+    println!(
+        "Replayed against {replayed} recorded decisions{}.",
+        if skipped > 0 {
+            format!(" ({skipped} could not be read)")
+        } else {
+            String::new()
+        }
+    );
+    for (i, (candidate, replay)) in ladder.iter().zip(&replays).enumerate() {
+        println!();
+        println!("  {}. {}", i + 1, candidate.label);
+        println!("     {}", candidate.condition);
+        println!(
+            "     fires on {} past decision{}; {} of them were allowed",
+            replay.fired,
+            if replay.fired == 1 { "" } else { "s" },
+            replay.newly_stopped
+        );
+        for (id, text) in &replay.examples {
+            println!("       #{id}  {}", first_line(text));
+        }
+    }
+    println!();
+    println!("Write one into the policy directory by re-running with --apply N.");
+    Ok(())
+}
+
+/// The first line of some text, cut to fit a terminal row.
+fn first_line(text: &str) -> String {
+    let line = text.lines().next().unwrap_or("");
+    let mut out: String = line.chars().take(72).collect();
+    if out.len() < line.len() || text.lines().nth(1).is_some() {
+        out.push('…');
+    }
+    out
+}
+
 fn handle_policy_explain(id: &str) -> Result<()> {
     let dir = policy_dir();
     match veto::explain::find_policy(&dir, id)? {
@@ -675,8 +888,25 @@ fn handle_test(
     verbose: bool,
     as_json: bool,
 ) -> Result<()> {
-    // Build the synthetic hook payload based on tool type
-    let payload = match tool {
+    let payload = test_payload(command, tool, path, url)?;
+
+    // Load Cedar runtime
+    let cedar = CedarRuntime::load(policy_dir_path)
+        .with_context(|| format!("load policies from {}", policy_dir_path.display()))?;
+
+    // Run adjudication
+    let result = adjudicate::adjudicate(&HookKind::BeforeTool, &payload, &cedar)?;
+    print_test_result(&result, cedar.policy_count(), verbose, as_json)
+}
+
+/// The synthetic hook payload for a command, file path or URL.
+fn test_payload(
+    command: Option<String>,
+    tool: &str,
+    path: Option<String>,
+    url: Option<String>,
+) -> Result<serde_json::Value> {
+    Ok(match tool {
         "Bash" => {
             let cmd = command.unwrap_or_default();
             serde_json::json!({
@@ -705,15 +935,15 @@ fn handle_test(
         _ => {
             bail!("Unknown tool: {tool}. Use: Bash, Write, Edit, Read, Delete, WebFetch");
         }
-    };
+    })
+}
 
-    // Load Cedar runtime
-    let cedar = CedarRuntime::load(policy_dir_path)
-        .with_context(|| format!("load policies from {}", policy_dir_path.display()))?;
-
-    // Run adjudication
-    let result = adjudicate::adjudicate(&HookKind::BeforeTool, &payload, &cedar)?;
-
+fn print_test_result(
+    result: &adjudicate::AdjudicationResult,
+    policy_count: usize,
+    verbose: bool,
+    as_json: bool,
+) -> Result<()> {
     if as_json {
         let yara_matches: Vec<serde_json::Value> = result
             .sig
@@ -738,7 +968,7 @@ fn handle_test(
                 "categories": cats,
                 "matches": yara_matches,
             },
-            "policy_count": cedar.policy_count(),
+            "policy_count": policy_count,
         });
         println!("{}", serde_json::to_string_pretty(&output)?);
         return Ok(());
@@ -770,7 +1000,7 @@ fn handle_test(
             .collect::<Vec<_>>()
             .join(", ")
     );
-    println!("  Policies loaded: {}", cedar.policy_count());
+    println!("  Policies loaded: {policy_count}");
 
     if verbose && !result.sig.matches.is_empty() {
         println!();
