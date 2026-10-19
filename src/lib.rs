@@ -8,6 +8,7 @@ pub mod config;
 pub mod doctor;
 pub mod effects;
 pub mod explain;
+pub mod facts;
 pub mod hook;
 pub mod ipc;
 pub mod llm;

@@ -40,6 +40,9 @@ pub struct Invocation {
     pub scan_text: String,
     /// Files the command writes or deletes, including redirect targets.
     pub effects: Vec<Effect>,
+    /// Positional arguments, as the command spec reads them: no options or
+    /// option values. None when no spec describes the program.
+    pub operands: Option<Vec<String>>,
 }
 
 /// A redirection on a simple command.
@@ -62,6 +65,8 @@ impl Invocation {
             .map(|(_, a)| a.as_str())
             .collect::<Vec<_>>()
             .join(" ");
+        let operands = (!facts.program.is_empty())
+            .then(|| facts.operands.iter().map(|&i| argv[i].clone()).collect());
         let mut effects = facts.effects;
         for redirect in redirects {
             text.push(' ');
@@ -79,6 +84,7 @@ impl Invocation {
             text,
             scan_text,
             effects,
+            operands,
             program: if facts.program.is_empty() {
                 argv[0].clone()
             } else {
@@ -95,6 +101,7 @@ impl Invocation {
             text: text.to_string(),
             scan_text: text.to_string(),
             effects: Vec::new(),
+            operands: None,
             program: String::new(),
             subcommand: String::new(),
             flags: Vec::new(),

@@ -45,12 +45,12 @@ The following Cedar schema defines the entity types, actions, and context types 
 
 ## Available Actions
 
-- `Action::"ShellCommand"` — shell/terminal commands (context has: command, program, subcommand, flags (canonical flag names, set), working_dir, signature, has_long_running_process, longest_process_runtime_seconds)
+- `Action::"ShellCommand"` — shell/terminal commands (context has: command, program, subcommand, flags (canonical flag names, set), working_dir, network, host, uploads, web_read, sensitive, signature, has_long_running_process, longest_process_runtime_seconds)
 - `Action::"WebFetch"` — HTTP requests (context has: url, signature)
-- `Action::"FileRead"` — reading files (context has: path, signature)
-- `Action::"FileWrite"` — writing files (context has: path, signature)
-- `Action::"FileEdit"` — editing files (context has: path, signature)
-- `Action::"FileDelete"` — deleting files (context has: path, signature)
+- `Action::"FileRead"` — reading files (context has: path, sensitive, signature)
+- `Action::"FileWrite"` — writing files (context has: path, sensitive, signature)
+- `Action::"FileEdit"` — editing files (context has: path, sensitive, signature)
+- `Action::"FileDelete"` — deleting files (context has: path, sensitive, signature)
 
 ## Example Policies
 

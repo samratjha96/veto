@@ -214,12 +214,21 @@ impl CedarRuntime {
                     .and_then(|c| c.as_str())
                     .unwrap_or("");
                 let (has_long, longest) = process_ctx.unwrap_or((false, 0));
+                let program = invocation.map_or("", |i| i.program.as_str());
+                let cwd = payload.get("cwd").and_then(|c| c.as_str()).unwrap_or("");
+                let operands = invocation.and_then(|i| i.operands.as_deref());
+                let facts = crate::facts::shell_facts(program, command, operands, cwd);
                 json!({
                     "command": command,
-                    "program": invocation.map_or("", |i| i.program.as_str()),
+                    "program": program,
                     "subcommand": invocation.map_or("", |i| i.subcommand.as_str()),
                     "flags": invocation.map_or(&[][..], |i| i.flags.as_slice()),
                     "working_dir": working_dir,
+                    "network": facts.network,
+                    "host": facts.host,
+                    "uploads": facts.uploads,
+                    "web_read": facts.web_read,
+                    "sensitive": facts.sensitive,
                     "signature": signature_json(sig),
                     "has_long_running_process": has_long,
                     "longest_process_runtime_seconds": longest,
@@ -243,8 +252,10 @@ impl CedarRuntime {
                     .and_then(|p| p.as_str())
                     .unwrap_or("");
                 let cwd = payload.get("cwd").and_then(|c| c.as_str()).unwrap_or("");
+                let path = crate::effects::normalize_path(path, cwd);
                 json!({
-                    "path": crate::effects::normalize_path(path, cwd),
+                    "sensitive": crate::facts::is_sensitive(&path),
+                    "path": path,
                     "signature": signature_json(sig),
                 })
             }

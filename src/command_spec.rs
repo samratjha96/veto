@@ -22,6 +22,9 @@ pub struct Facts {
     /// Indexes into argv of arguments that are plain data to the tool (option
     /// values, or everything for a tool whose arguments are text), not code or paths.
     pub data: Vec<usize>,
+    /// Indexes into argv of positional arguments: not options, their values, or
+    /// subcommand words.
+    pub operands: Vec<usize>,
     /// Files the command writes or deletes, as the spec says it treats its operands.
     pub effects: Vec<Effect>,
 }
@@ -171,8 +174,9 @@ pub fn describe(argv: &[String]) -> Facts {
     };
     let mut flags = Vec::new();
     let mut operands: Vec<&str> = Vec::new();
+    let mut operand_indexes = Vec::new();
     let mut options_ended = false;
-    while let Some((_, arg)) = args.next() {
+    while let Some((i, arg)) = args.next() {
         if options_ended || !arg.starts_with('-') || arg == "-" {
             if !options_ended
                 && operands.is_empty()
@@ -184,6 +188,7 @@ pub fn describe(argv: &[String]) -> Facts {
                 continue;
             }
             operands.push(arg);
+            operand_indexes.push(i);
             for (prefix, flag) in spec.iter().flat_map(|s| &s.prefix_flags) {
                 if arg.starts_with(prefix.as_str()) {
                     flags.push(flag.clone());
@@ -229,6 +234,7 @@ pub fn describe(argv: &[String]) -> Facts {
         subcommand,
         flags,
         data,
+        operands: operand_indexes,
         effects,
     }
 }

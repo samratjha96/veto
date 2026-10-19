@@ -33,6 +33,16 @@ type ShellCommandContext = {
     subcommand: String,
     flags: Set<String>,
     working_dir: String,
+    // The program talks to the network (curl, wget, ssh, ...).
+    network: Bool,
+    // The host it talks to, if an argument names one.
+    host: String,
+    // It sends local data to a host off this machine and network.
+    uploads: Bool,
+    // It downloads from a host off this machine and network.
+    web_read: Bool,
+    // An argument is a credential path.
+    sensitive: Bool,
     signature: SignatureContext,
     has_long_running_process: Bool,
     longest_process_runtime_seconds: Long,
@@ -59,6 +69,8 @@ action "WebFetch" appliesTo {
 // File operation contexts.
 type FileReadContext = {
     path: String,
+    // The path holds credentials.
+    sensitive: Bool,
     signature: SignatureContext,
 };
 
@@ -70,6 +82,8 @@ action "FileRead" appliesTo {
 
 type FileWriteContext = {
     path: String,
+    // The path holds credentials.
+    sensitive: Bool,
     signature: SignatureContext,
 };
 
@@ -81,6 +95,8 @@ action "FileWrite" appliesTo {
 
 type FileEditContext = {
     path: String,
+    // The path holds credentials.
+    sensitive: Bool,
     signature: SignatureContext,
 };
 
@@ -92,6 +108,8 @@ action "FileEdit" appliesTo {
 
 type FileDeleteContext = {
     path: String,
+    // The path holds credentials.
+    sensitive: Bool,
     signature: SignatureContext,
 };
 
